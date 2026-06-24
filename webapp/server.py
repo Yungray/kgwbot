@@ -625,7 +625,7 @@ def run_chat_turn(
 # ───────────────────────────────────────────────────────────
 # FastAPI 앱
 # ───────────────────────────────────────────────────────────
-app = FastAPI(title="Agit CS·VOC 챗봇", version="0.2.0")
+app = FastAPI(title="솔루션개발형님", version="0.2.0")
 
 BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
@@ -1130,14 +1130,14 @@ async def report_html(req: ReportRequest):
   {subtitle_html}
   <div class="report-meta">
     <span>생성 시각: {now_str}</span>
-    <span>출처: Agit CS·VOC 챗봇</span>
+    <span>출처: 솔루션개발형님</span>
     <span>모델: {GEMINI_MODEL}</span>
   </div>
 </header>
 <main class="report-body">
 {body_html}
 </main>
-<footer class="report-footer">© Agit CS·VOC Bot · 본 문서는 자동 생성된 분석 리포트입니다.</footer>
+<footer class="report-footer">© 솔루션개발형님 · 본 문서는 자동 생성된 분석 리포트입니다.</footer>
 </body>
 </html>
 """
