@@ -640,6 +640,57 @@
     scrollToBottom();
   }
 
+  // 스트리밍용 빈 봇 버블 생성 → delta마다 평문 갱신, done 시 마크다운+툴칩+액션으로 finalize.
+  function createStreamingBot() {
+    const tmpl = $('#message-bot-tmpl').content.cloneNode(true);
+    const t = tmpl.querySelector('.message-tools'); if (t) t.remove();
+    const a = tmpl.querySelector('.message-actions'); if (a) a.remove();
+    const c = tmpl.querySelector('.message-content');
+    c.classList.add('streaming');
+    c.textContent = '';
+    messagesEl.appendChild(tmpl);
+    const msgEl = messagesEl.lastElementChild;
+    scrollToBottom();
+    return {
+      msgEl,
+      contentEl: msgEl.querySelector('.message-content'),
+      setText(text) { this.contentEl.textContent = text; scrollToBottom(); },
+      finalize(fullText, toolCalls, opts) {
+        opts = opts || {};
+        const body = this.msgEl.querySelector('.message-body');
+        this.contentEl.classList.remove('streaming');
+        this.contentEl.innerHTML = renderMarkdown(fullText || '*(응답이 비어있습니다)*');
+        enhanceCopyableBlocks(this.contentEl);
+        this.contentEl.querySelectorAll('a').forEach((el) => { el.target = '_blank'; el.rel = 'noopener noreferrer'; });
+        if (toolCalls && toolCalls.length > 0) {
+          const toolsEl = document.createElement('div');
+          toolsEl.className = 'message-tools';
+          toolCalls.forEach((tc) => {
+            const meta = TOOL_LABELS[tc.name] || { icon: '🔧', label: tc.name };
+            const chip = document.createElement('span');
+            chip.className = 'tool-chip';
+            chip.textContent = `${meta.icon} ${meta.label}`;
+            chip.title = `${tc.name}\n${JSON.stringify(tc.args || {}, null, 2)}`;
+            toolsEl.appendChild(chip);
+          });
+          body.insertBefore(toolsEl, this.contentEl);
+        }
+        if (opts.mode === 'report' && fullText && fullText.trim()) {
+          const actionsEl = document.createElement('div');
+          actionsEl.className = 'message-actions';
+          const dlBtn = document.createElement('button');
+          dlBtn.type = 'button';
+          dlBtn.className = 'download-btn';
+          dlBtn.innerHTML = '<span>📥</span> HTML 리포트 다운로드';
+          dlBtn.addEventListener('click', () => downloadReport(fullText, opts, dlBtn));
+          actionsEl.appendChild(dlBtn);
+          body.appendChild(actionsEl);
+        }
+        scrollToBottom();
+      },
+    };
+  }
+
   async function downloadReport(markdown, opts, btn) {
     const groupLabel = opts.group || '전체';
     const title = `VOC 리포트 — ${groupLabel}`;
@@ -818,8 +869,9 @@
     showLoading(targetGroup);
     startLoadingTimer(targetGroup);
 
+    const viewMatches = () => currentGroup === targetGroup && currentMode === targetMode;
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -837,33 +889,79 @@
         }),
       });
 
-      hideLoading();
-      stopLoadingTimer();
-
       if (!res.ok) {
+        hideLoading();
+        stopLoadingTimer();
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         const errText = `❌ **오류**: ${err.detail || res.statusText}`;
         const errMsg = { role: 'bot', text: errText, toolCalls: [], mode: targetMode, group: targetGroup, isError: true, retryMessage: msg };
-        if (currentGroup === targetGroup && currentMode === targetMode) appendBotMessage(errText, [], errMsg);
+        if (viewMatches()) appendBotMessage(errText, [], errMsg);
         pushMessage(targetGroup, targetMode, errMsg);
         setModuleState(targetGroup, targetMode, { status: 'error', finishedAt: Date.now(), lastMessageAt: Date.now() });
         setStatus('error', '● 오류');
         return;
       }
 
-      const data = await res.json();
-      setSessionFor(targetGroup, targetMode, data.session_id);
-      if (currentGroup === targetGroup && currentMode === targetMode) {
-        sessionId = data.session_id;
+      // SSE 소비: delta(부분 텍스트) 누적 → 첫 delta에 로딩 숨기고 버블 생성, done에 마무리.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullText = '';
+      let toolCalls = [];
+      let doneData = null;
+      let errDetail = null;
+      let streamBot = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop();
+        for (const block of blocks) {
+          if (!block.trim()) continue;
+          let ev = 'message', dataStr = '';
+          block.split('\n').forEach((line) => {
+            if (line.startsWith('event:')) ev = line.slice(6).trim();
+            else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+          });
+          let payload = {};
+          try { payload = JSON.parse(dataStr); } catch (_) {}
+          if (ev === 'delta') {
+            fullText += payload.text || '';
+            if (!streamBot && viewMatches()) {
+              hideLoading();
+              stopLoadingTimer();
+              streamBot = createStreamingBot();
+            }
+            if (streamBot) streamBot.setText(fullText);
+          } else if (ev === 'done') {
+            doneData = payload;
+            toolCalls = payload.tool_calls || [];
+          } else if (ev === 'error') {
+            errDetail = payload.detail || '알 수 없는 오류';
+          }
+        }
+      }
+
+      hideLoading();
+      stopLoadingTimer();
+      if (errDetail) throw new Error(errDetail);
+
+      const sid = (doneData && doneData.session_id) || getSessionFor(targetGroup, targetMode);
+      setSessionFor(targetGroup, targetMode, sid);
+      if (viewMatches()) {
+        sessionId = sid;
         updateSessionBadge();
-        appendBotMessage(data.text, data.tool_calls, { mode: data.mode, group: data.group });
+        if (streamBot) streamBot.finalize(fullText, toolCalls, { mode: targetMode, group: targetGroup });
+        else appendBotMessage(fullText, toolCalls, { mode: targetMode, group: targetGroup });
       }
       pushMessage(targetGroup, targetMode, {
-        role: 'bot', text: data.text, toolCalls: data.tool_calls,
-        mode: data.mode, group: data.group, createdAt: Date.now(),
+        role: 'bot', text: fullText, toolCalls,
+        mode: targetMode, group: targetGroup, createdAt: Date.now(),
       });
       setModuleState(targetGroup, targetMode, {
-        status: currentGroup === targetGroup && currentMode === targetMode ? 'idle' : 'done',
+        status: viewMatches() ? 'idle' : 'done',
         finishedAt: Date.now(),
         lastMessageAt: Date.now(),
       });

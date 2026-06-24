@@ -13,8 +13,11 @@ import sys
 import time
 import json
 import uuid
+import queue
 import base64
+import asyncio
 import binascii
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Literal
@@ -32,7 +35,7 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -138,11 +141,29 @@ DEFAULT_MODEL = _env_model if _env_model in _AVAILABLE_MODEL_IDS else AVAILABLE_
 # 호환용 별칭 (기존 코드가 GEMINI_MODEL을 참조)
 GEMINI_MODEL = DEFAULT_MODEL
 
+# 답변가이드(guide) 기본 모델 — 속도 우선. guide는 find_similar_cases 등 도구 왕복이 많아
+# pro의 긴 추론 지연이 크고, '과거 사례로 초안 작성'은 flash로 충분하다. 카탈로그의 flash 우선.
+_FLASH_PREFERRED = ["gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite"]
+GUIDE_MODEL = next(
+    (m for m in _FLASH_PREFERRED if m in _AVAILABLE_MODEL_IDS),
+    next((m["id"] for m in AVAILABLE_MODELS if m.get("tier") in ("flash", "lite")), DEFAULT_MODEL),
+)
 
-def resolve_model(requested: str | None) -> str:
-    """클라이언트가 보낸 모델 id가 카탈로그에 있으면 그걸, 아니면 DEFAULT_MODEL."""
-    if requested and requested in _AVAILABLE_MODEL_IDS:
-        return requested
+# 도구 이름 → 실제 함수. 스트리밍 경로는 AFC를 끄고 수동으로 도구를 실행하기 위해 필요.
+_TOOL_FUNCS = {f.__name__: f for f in TOOLS}
+
+
+def resolve_model(requested: str | None, mode: str | None = None) -> str:
+    """클라이언트가 보낸 모델 id가 카탈로그에 있으면 그걸, 아니면 모드별 기본값.
+
+    - 사용자가 기본(DEFAULT_MODEL)과 다른 모델을 명시적으로 고른 경우엔 그 선택을 존중.
+    - 그 외(미지정/기본값 그대로)에서 guide 모드는 속도 우선 GUIDE_MODEL(flash)로 경량화.
+    """
+    req = requested if (requested and requested in _AVAILABLE_MODEL_IDS) else None
+    if req and req != DEFAULT_MODEL:
+        return req
+    if mode == "guide":
+        return GUIDE_MODEL
     return DEFAULT_MODEL
 
 
@@ -687,7 +708,7 @@ async def chat(req: ChatRequest):
     if group and group not in GROUPS:
         raise HTTPException(status_code=400, detail=f"알 수 없는 그룹: {group}")
 
-    chosen_model = resolve_model(req.model)
+    chosen_model = resolve_model(req.model, mode=req.mode)
     _session_meta[session_id] = {"mode": req.mode, "group": group, "model": chosen_model}
 
     try:
@@ -705,6 +726,107 @@ async def chat(req: ChatRequest):
         mode=req.mode,
         group=group,
         model=chosen_model,
+    )
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(req: ChatRequest):
+    """답변을 토큰 단위로 SSE 스트리밍. 도구 왕복은 SDK가 처리하고 최종 텍스트가 흐른다.
+    이벤트: delta(부분 텍스트) → done(session_id·tool_calls·model) / error(detail).
+    """
+    if not req.message.strip() and not req.images:
+        raise HTTPException(status_code=400, detail="message 또는 image는 비어있을 수 없습니다")
+
+    session_id = req.session_id or str(uuid.uuid4())
+    group = req.group if (req.group and req.group not in ("", "전체")) else None
+    if group and group not in GROUPS:
+        raise HTTPException(status_code=400, detail=f"알 수 없는 그룹: {group}")
+
+    chosen_model = resolve_model(req.model, mode=req.mode)
+    _session_meta[session_id] = {"mode": req.mode, "group": group, "model": chosen_model}
+
+    # 블로킹 스트리밍·도구실행·contextvar(PINNED_*) set/reset을 단일 워커 스레드에서 일관되게 수행하고,
+    # SSE 문자열을 큐로 넘긴다. (제너레이터를 스레드풀이 next()마다 다른 스레드로 재개하면
+    # contextvar 토큰이 '다른 컨텍스트'에서 reset돼 에러나므로, 한 스레드에 가둔다.)
+    q: "queue.Queue" = queue.Queue()
+    _DONE = object()
+
+    def _worker():
+        try:
+            image_context = analyze_images_for_search(req.images, model=chosen_model)
+            state = _sessions.setdefault(session_id, {"history": []})
+            prev_history = list(state["history"])
+            # SDK의 send_message_stream은 자동 함수호출(AFC)을 제대로 처리하지 못해(도구 턴에서 빈 응답)
+            # AFC를 끄고 함수호출을 수동 루프로 처리한다: 도구 실행 → function_response 전송 → 최종 답변 스트리밍.
+            cfg = build_chat_config(chosen_model, req.mode, _build_system(req.mode, group))
+            cfg.automatic_function_calling = types.AutomaticFunctionCallingConfig(disable=True)
+            chat = _client.chats.create(model=chosen_model, config=cfg, history=prev_history)
+
+            tool_calls: list[dict] = []
+            _ctx = PINNED_GROUP.set(group)
+            _mode = PINNED_MODE.set(req.mode)
+            try:
+                message = _compose_user_message(req.message, image_context)
+                for _round in range(8):   # 도구 왕복 상한
+                    pending = []
+                    for chunk in chat.send_message_stream(message):
+                        for cand in (chunk.candidates or []):
+                            for part in (getattr(getattr(cand, "content", None), "parts", None) or []):
+                                if getattr(part, "text", None):
+                                    q.put(_sse("delta", {"text": part.text}))
+                                fc = getattr(part, "function_call", None)
+                                if fc and fc.name:
+                                    pending.append(fc)
+                    if not pending:
+                        break   # 도구 호출 없음 → 최종 답변까지 스트리밍 완료
+                    responses = []
+                    for fc in pending:
+                        fn = _TOOL_FUNCS.get(fc.name)
+                        args = dict(fc.args) if fc.args else {}
+                        tool_calls.append({"name": fc.name, "args": args})
+                        try:
+                            result = fn(**args) if fn else {"error": f"알 수 없는 도구: {fc.name}"}
+                        except Exception as ex:
+                            result = {"error": f"{type(ex).__name__}: {ex}"}
+                        if not isinstance(result, dict):
+                            result = {"result": result}
+                        responses.append(types.Part.from_function_response(name=fc.name, response=result))
+                    message = responses   # 다음 턴: 도구 결과 전달
+            finally:
+                PINNED_GROUP.reset(_ctx)
+                PINNED_MODE.reset(_mode)
+
+            state["history"] = chat.get_history()
+            q.put(_sse("done", {
+                "session_id": session_id,
+                "tool_calls": tool_calls,
+                "model": chosen_model,
+                "mode": req.mode,
+                "group": group,
+            }))
+        except Exception as e:
+            q.put(_sse("error", {"detail": f"Gemini 호출 실패: {type(e).__name__}: {e}"}))
+        finally:
+            q.put(_DONE)
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+    async def _agen():
+        loop = asyncio.get_running_loop()
+        while True:
+            item = await loop.run_in_executor(None, q.get)
+            if item is _DONE:
+                break
+            yield item
+
+    return StreamingResponse(
+        _agen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
