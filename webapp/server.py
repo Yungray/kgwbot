@@ -781,7 +781,7 @@ import threading
 
 _STATS_CACHE: dict = {}
 _STATS_CACHE_LOCK = threading.Lock()
-STATS_CACHE_TTL = 60  # 초
+STATS_CACHE_TTL = 300  # 초 (5분) — Agit이 느려 같은 조건 재조회를 길게 캐시. 최신화는 ↻ 새로고침(nocache)
 
 
 def _cached_group_task_stats(nocache: bool = False, **kwargs) -> dict:

@@ -172,7 +172,11 @@ class AgitClient:
                 continue
             r.raise_for_status()
             return r.json()
-        return {}
+        # 429 재시도 소진 → 조용히 {}를 돌려주면 페이지 순회가 '마지막 페이지'로 오인해
+        # 집계가 누락된다. 반드시 예외로 올려 호출부가 인지하도록 한다.
+        raise RuntimeError(
+            f"Agit 429 재시도 소진 (q={params.get('q')!r}, page={params.get('page')}, sec={params.get('sec')})"
+        )
 
     def comment_ids(self, message_id: int, retries: int = 3) -> list[int]:
         """특정 wall message의 댓글 ID 목록을 조회."""
@@ -272,6 +276,7 @@ def _search_multi(
     total = 0
     per_id_counts: dict[str, int] = {}
     per_group_counts: dict[str, int] = {}
+    # Agit이 지속 요청 속도를 제한하므로(동시·고빈도 호출 시 429) 그룹별 호출은 순차 + 짧은 sleep.
     for i, gid in enumerate(group_ids):
         data = client.search(query, group_id=gid, **kwargs)
         cnt = int(data.get("total_count") or 0)
@@ -903,6 +908,12 @@ def list_available_groups() -> dict:
     }
 
 
+# find_similar_cases 결과 캐시. 동일 문의 재질의(챗봇 답변가이드 재시도 등) 시 ~수십초 검색을
+# 0초로. 과거 사례 기반이라 신선도 민감도 낮음 → 10분 TTL. 키: (그룹, 모드, 정규화 쿼리, top_k).
+_SIMILAR_CACHE: dict = {}
+_SIMILAR_CACHE_TTL = 600  # 초 (10분)
+
+
 def find_similar_cases(
     query_text: str,
     group_name: str,
@@ -933,6 +944,13 @@ def find_similar_cases(
         return {"error": str(e)}
 
     top_k = max(1, min(int(top_k), 10))
+
+    # 캐시 조회 — 동일 (그룹·모드·쿼리·top_k)면 검색 생략. 결과에 from_cache 플래그 부여.
+    cache_key = (group_name, PINNED_MODE.get(), (query_text or "").strip(), top_k)
+    _cached = _SIMILAR_CACHE.get(cache_key)
+    if _cached and (time.time() - _cached[0]) < _SIMILAR_CACHE_TTL:
+        return {**_cached[1], "from_cache": True}
+
     keywords = _extract_keywords(query_text, max_keywords=8)
 
     if not keywords:
@@ -961,6 +979,8 @@ def find_similar_cases(
             for page in range(1, DATE_PASS_PAGES + 1):
                 search_tasks.append((kw, "relevant", i, page, date_window))
 
+    # 검색 task(recent/relevant/날짜 패스)는 순차 실행 + 짧은 sleep. Agit 지속 요청속도 제한 때문에
+    # 병렬화는 429 백오프로 오히려 느려져(실측) 순차가 안전·최적. 제출 순서대로 결정적 병합.
     for kw, sort_mode, query_index, page, dwin in search_tasks:
         search_kwargs = dict(id_names=id_names, parent="all", sort=sort_mode, page=page)
         if dwin:
@@ -1006,7 +1026,7 @@ def find_similar_cases(
                     "match_score": current_score,
                     "matched_keywords": [kw],
                 }
-        time.sleep(0.5)  # rate limit 보호 (페이징/날짜 패스로 task가 늘어 간격 단축; 429는 client.search가 백오프)
+        time.sleep(0.5)  # Agit 레이트리밋 회피 (task 간 간격)
 
     # 1차 점수 → 최신성 순으로 정렬, recency_rank 부여
     by_recency = sorted(
@@ -1054,7 +1074,7 @@ def find_similar_cases(
         ),
     )
 
-    return {
+    result = {
         "matched_keywords": keywords,
         "searched_keywords": search_queries,
         "group_name": group_name,
@@ -1065,6 +1085,8 @@ def find_similar_cases(
         "ranking_note": "rank_score는 키워드 가중치, 본문 관련도(빈도·커버리지), 템플릿 일치, 댓글 수, 최신성, 그룹명, 상위 후보의 실제 최신 댓글 본문/처리 상태를 함께 반영합니다. 모든 top_cases에는 original_body가 포함됩니다.",
         "top_cases": ranked[:top_k],
     }
+    _SIMILAR_CACHE[cache_key] = (time.time(), result)
+    return result
 
 
 def fetch_thread_detail(message_id: int, group_name: str = "") -> dict:
@@ -1207,35 +1229,25 @@ def _count_group_posts(
     api_total_count = 0
     pages_fetched: dict[str, int] = {}
 
+    # Agit이 지속 요청 속도를 제한하므로(동시·고빈도 호출 시 429 → 백오프로 느려지고 페이지 누락)
+    # 페이지/그룹 순회는 순차 + 짧은 sleep으로 레이트리밋을 회피한다(병렬화는 역효과로 실측 확인).
+    # scope="all": 벽 글만이 아니라 그룹 내 전체 원글 집계 → 운영 기준과 일치(scope="wall"은 과소집계).
+    stop = False
     for i, gid in enumerate(target_group_ids):
         gid_key = str(gid) if gid else "__no_id__"
         group_label = id_names.get(str(gid), gid_key) if gid else gid_key
-        page = 1
         per_id_counts[gid_key] = 0
         per_group_counts[group_label] = 0
-
+        page = 1
         while True:
             data = client.search(
-                "",
-                group_id=gid,
-                sort="recent",
-                # scope="all": 벽(wall) 글만이 아니라 그룹 내 전체 원글을 집계해야
-                # 운영 기준(agit_eapproval_delta.py fetch_recent)과 건수가 일치한다.
-                # scope="wall"은 일반 문의/공지성 원글을 누락시켜 과소집계됨.
-                scope="all",
-                parent="parent",
-                page=page,
-                date_range="specific",
-                date_start=date_start,
-                date_end=date_end,
-                exclude_bot=exclude_bot,
-                is_task=is_task,
-                task_assignee="all" if is_task else None,
-                task_status=task_status,
+                "", group_id=gid, sort="recent", scope="all", parent="parent",
+                page=page, date_range="specific", date_start=date_start, date_end=date_end,
+                exclude_bot=exclude_bot, is_task=is_task,
+                task_assignee="all" if is_task else None, task_status=task_status,
             )
             if page == 1:
                 api_total_count += int(data.get("total_count") or 0)
-
             page_messages = data.get("wall_messages") or []
             for m in page_messages:
                 mid = m.get("message_id")
@@ -1245,19 +1257,17 @@ def _count_group_posts(
                 merged.append(m)
                 per_id_counts[gid_key] += 1
                 per_group_counts[group_label] += 1
-
             pages_fetched[gid_key] = page
             has_more = data.get("has_more")
             has_more = has_more is True or str(has_more).lower() == "true"
             if not has_more or not page_messages:
                 break
             if max_messages is not None and len(merged) >= max_messages:
+                stop = True
                 break
-
             page += 1
             time.sleep(0.3)
-
-        if max_messages is not None and len(merged) >= max_messages:
+        if stop:
             break
         if i < len(target_group_ids) - 1:
             time.sleep(0.5)
@@ -1323,9 +1333,10 @@ def get_group_task_stats(
             }
         group_ids = [target_group_id]
 
-    # total(1) + 상태별(4) 카운트를 병렬 집계. 각 _count_group_posts는 로컬 상태만 쓰고
-    # self-contained dict를 반환하며 client는 stateless라 스레드 공유 안전.
-    # 순차 sleep 누적(그룹당 10~30초) 대신 동시 실행으로 단축. 429는 client.search 백오프가 처리.
+    # total(1) + 상태별(4) 카운트. 각 패스는 서로 독립이고 내부에서 페이지 순회 시 sleep으로
+    # 레이트리밋을 회피하므로, 패스 5개는 병렬로 띄워 좁은 기간(흔한 경우)의 응답을 단축한다.
+    # (페이지/그룹 레벨까지 중첩 병렬화하면 지속 호출속도 제한에 걸려 429로 역효과 → 그 레벨은 순차 유지.)
+    # 넓은 기간에서 429 재시도가 소진되면 client.search가 예외 → 잘못된 부분집계 대신 명확한 에러 반환.
     def _count_total():
         return _count_group_posts(
             client, group_ids, id_names, date_start, date_end,
@@ -1339,14 +1350,14 @@ def get_group_task_stats(
             collect_messages=include_rows,
         )
 
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        total_future = ex.submit(_count_total)
-        status_futures = {
-            status: ex.submit(_count_status, status)
-            for status in _TASK_STATUS_LABELS
-        }
-        total = total_future.result()
-        counted_by_status = {status: fut.result() for status, fut in status_futures.items()}
+    try:
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            total_future = ex.submit(_count_total)
+            status_futures = {s: ex.submit(_count_status, s) for s in _TASK_STATUS_LABELS}
+            total = total_future.result()
+            counted_by_status = {s: f.result() for s, f in status_futures.items()}
+    except RuntimeError as e:
+        return {"error": f"Agit 응답이 지연/제한되고 있습니다. 기간을 좁히거나 잠시 후 다시 시도해주세요. ({e})"}
 
     status_counts: dict[str, dict] = {}
     numeric_status_counts: dict[int, int] = {}
