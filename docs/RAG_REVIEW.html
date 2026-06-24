@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agit 챗봇 — 벡터 검색 / Graph RAG 전환 검토</title>
+<style>
+  :root {
+    --indigo-500: #6366F1;
+    --indigo-600: #4F46E5;
+    --indigo-100: #EEF2FF;
+    --gray-950: #111827;
+    --gray-900: #18212F;
+    --gray-700: #374151;
+    --gray-600: #4B5563;
+    --gray-500: #6B7280;
+    --gray-400: #9CA3AF;
+    --gray-300: #D1D5DB;
+    --gray-200: #E5E7EB;
+    --gray-100: #F3F4F6;
+    --gray-50: #F9FAFB;
+    --white: #FFFFFF;
+    --success-700: #16A34A;
+    --success-100: #DCFCE7;
+    --warning-600: #D97706;
+    --warning-100: #FEF3C7;
+    --error-600: #DC2626;
+    --error-100: #FEE2E2;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --shadow-lg: 0 8px 30px rgba(17,24,39,0.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--gray-50);
+    color: var(--gray-900);
+    font-family: Inter, "SF Pro Display", system-ui, -apple-system, "Noto Sans KR", sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 24px 80px; }
+
+  /* Hero */
+  header.hero {
+    background: linear-gradient(135deg, var(--gray-950), var(--gray-900));
+    color: #fff;
+    padding: 56px 0 48px;
+    margin-bottom: 40px;
+  }
+  header.hero .wrap { padding-bottom: 0; }
+  .eyebrow {
+    display: inline-block;
+    background: rgba(99,102,241,0.18);
+    color: #c7d2fe;
+    font-size: 12px; font-weight: 700; letter-spacing: .04em;
+    padding: 5px 12px; border-radius: 999px; margin-bottom: 18px;
+  }
+  header.hero h1 { margin: 0; font-size: 34px; font-weight: 800; line-height: 1.2; letter-spacing: -.01em; }
+  header.hero p.sub { margin: 16px 0 0; color: #9ca3af; font-size: 16px; max-width: 680px; }
+  header.hero .meta { margin-top: 26px; display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px; color: #cbd5e1; }
+  header.hero .meta b { color: #fff; font-weight: 600; }
+
+  /* Section */
+  section { margin-bottom: 44px; }
+  .sec-head { display: flex; align-items: center; gap: 12px; margin: 0 0 18px; }
+  .sec-num {
+    flex: none; width: 34px; height: 34px; border-radius: 9px;
+    background: var(--indigo-100); color: var(--indigo-600);
+    display: grid; place-items: center; font-weight: 800; font-size: 15px;
+  }
+  h2 { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  h3 { font-size: 16px; font-weight: 700; margin: 24px 0 10px; }
+  p { margin: 0 0 12px; color: var(--gray-700); }
+  .lead { font-size: 16px; color: var(--gray-600); }
+
+  /* Cards */
+  .card {
+    background: var(--white); border: 1px solid var(--gray-200);
+    border-radius: 12px; box-shadow: var(--shadow); padding: 22px 24px;
+  }
+  .card + .card { margin-top: 14px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+
+  .callout {
+    border-left: 4px solid var(--indigo-500);
+    background: var(--indigo-100);
+    border-radius: 0 10px 10px 0;
+    padding: 16px 20px; margin: 8px 0 16px; color: var(--gray-700);
+  }
+  .callout.warn { border-color: var(--warning-600); background: var(--warning-100); }
+  .callout b { color: var(--gray-950); }
+
+  /* Review item cards */
+  .review { display: grid; gap: 12px; }
+  .ritem {
+    background: var(--white); border: 1px solid var(--gray-200);
+    border-radius: 12px; box-shadow: var(--shadow); padding: 18px 20px;
+    display: grid; grid-template-columns: 40px 1fr; gap: 14px; align-items: start;
+  }
+  .ritem .tag {
+    width: 32px; height: 32px; border-radius: 8px; flex: none;
+    display: grid; place-items: center; font-weight: 800; font-size: 14px;
+    background: var(--gray-100); color: var(--gray-600);
+  }
+  .ritem .ttl { font-weight: 700; font-size: 15px; margin: 0 0 4px; }
+  .ritem p { margin: 0; font-size: 14px; }
+
+  /* Badges */
+  .badge {
+    display: inline-block; border-radius: 999px; padding: 2px 10px;
+    font-size: 11px; font-weight: 700; vertical-align: middle; margin-left: 8px;
+  }
+  .badge.must { background: var(--error-100); color: var(--error-600); }
+  .badge.high { background: var(--warning-100); color: var(--warning-600); }
+  .badge.first { background: var(--success-100); color: var(--success-700); }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--white);
+    border: 1px solid var(--gray-200); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+  th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--gray-200); vertical-align: top; }
+  th { background: var(--gray-50); font-size: 12px; font-weight: 700; color: var(--gray-500); text-transform: uppercase; letter-spacing: .03em; }
+  tr:last-child td { border-bottom: none; }
+  td b { color: var(--gray-950); }
+
+  ul.clean { margin: 0 0 12px; padding-left: 20px; color: var(--gray-700); }
+  ul.clean li { margin-bottom: 6px; }
+  code { background: var(--gray-100); color: var(--indigo-600); padding: 1px 6px; border-radius: 5px; font-size: 13px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  /* pro/con */
+  .pc { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .pc { grid-template-columns: 1fr; } }
+  .pc .box { border-radius: 12px; padding: 18px 20px; border: 1px solid; }
+  .pc .good { background: #f0fdf4; border-color: #bbf7d0; }
+  .pc .bad { background: #fef2f2; border-color: #fecaca; }
+  .pc h4 { margin: 0 0 10px; font-size: 14px; font-weight: 700; }
+  .pc .good h4 { color: var(--success-700); }
+  .pc .bad h4 { color: var(--error-600); }
+  .pc ul { margin: 0; padding-left: 18px; font-size: 14px; color: var(--gray-700); }
+  .pc li { margin-bottom: 6px; }
+
+  /* roadmap */
+  .road { display: grid; gap: 12px; }
+  .phase {
+    display: grid; grid-template-columns: 120px 1fr; gap: 18px; align-items: start;
+    background: var(--white); border: 1px solid var(--gray-200); border-radius: 12px;
+    box-shadow: var(--shadow); padding: 18px 22px;
+  }
+  .phase .ph { font-weight: 800; color: var(--indigo-600); font-size: 15px; }
+  .phase .ph small { display: block; color: var(--gray-400); font-weight: 600; font-size: 12px; margin-top: 2px; }
+  .phase p { margin: 0; font-size: 14px; }
+  .phase.p1 { border-left: 4px solid var(--indigo-500); }
+
+  footer { color: var(--gray-400); font-size: 12px; text-align: center; margin-top: 50px; }
+  .rec { font-weight: 700; color: var(--gray-950); }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow">기술 검토 · SEARCH_SPEC B-3 확장</span>
+    <h1>Agit 챗봇에 벡터 DB · 검색엔진을<br />붙이려면 — 검토 단계 정리</h1>
+    <p class="sub">현재 "Agit 검색 위의 stateless 프록시" 구조를 "자체 인덱스를 소유하는 RAG" 구조로 전환할 때 필요한 작업과, Graph RAG 도입에 대한 판단을 정리합니다.</p>
+    <div class="meta">
+      <span><b>대상</b> agit.py · find_similar_cases</span>
+      <span><b>성격</b> 검토(Phase 0) 중심</span>
+      <span><b>작성</b> 2026-05-27</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- 0 -->
+  <section>
+    <div class="sec-head"><span class="sec-num">0</span><h2>지금 구조의 본질과 전환의 의미</h2></div>
+    <p class="lead">현재 시스템은 <b>데이터를 소유하지 않습니다.</b> 매 질의마다 그룹 토큰으로 <code>api.agit.in/v2/search</code>(substring exact 매칭)를 실시간 호출해 결과만 중계합니다.</p>
+    <div class="callout">
+      <b>SEARCH_SPEC B-4의 핵심 한계:</b> "Agit API 인덱싱은 서드파티 영역 — 우리가 손댈 수 있는 건 쿼리 전략(정렬·동의어·기간·페이징)뿐."
+      벡터/Graph RAG로 간다는 건 이 전제를 <b>"우리가 데이터 사본 + 인덱스를 소유한다"</b>로 바꾸는 것이며, 검토의 거의 모든 항목이 여기서 파생됩니다.
+    </div>
+    <div class="card">
+      <p style="margin:0;">✅ <b>좋은 소식:</b> <code>get_group_task_stats</code>가 이미 <code>search.total</code>을 <code>page=1</code>부터 <code>has_more=false</code>까지 <b>전수 순회</b>하고 있습니다(<code>agit.py:1077–1116</code>). 즉 <b>Agit에서 글을 벌크로 빼올 수 있는 경로가 이미 증명</b>되어 있어, 자체 인덱스 구축의 첫 관문은 통과한 상태입니다.</p>
+    </div>
+  </section>
+
+  <!-- 1 -->
+  <section>
+    <div class="sec-head"><span class="sec-num">1</span><h2>검토 단계(Phase 0) — 빌드 전에 닫을 결정 게이트</h2></div>
+    <p class="lead">우선순위 순으로, 빌드보다 먼저 답해야 하는 질문들입니다.</p>
+    <div class="review">
+
+      <div class="ritem">
+        <span class="tag">①</span>
+        <div>
+          <p class="ttl">데이터 접근 · 동기화 <span class="badge high">Feasibility</span></p>
+          <p>벌크 추출 경로는 확인됨. 검증 필요: <b>댓글 포함 여부</b>(처리상태는 root 글이 아니라 댓글 스레드에 있음 → 글마다 <code>fetch_thread_detail</code> 필요 → 초기 적재 시 콜 폭증·rate limit), <b>증분 동기화</b>(웹훅 없으면 날짜 윈도우 폴링 + 댓글이 나중에 달리면 스레드 재색인 트리거).</p>
+        </div>
+      </div>
+
+      <div class="ritem">
+        <span class="tag">②</span>
+        <div>
+          <p class="ttl">데이터 프로파일링</p>
+          <p>그룹별 글 수 · 증가율 · 댓글 밀도 · 평균 본문 길이. → 벡터 DB 선택과 재색인 주기를 결정. 현재 규모면 대형 분산 스토어는 과합니다.</p>
+        </div>
+      </div>
+
+      <div class="ritem">
+        <span class="tag">③</span>
+        <div>
+          <p class="ttl">권한 · 격리 모델 보존 <span class="badge must">보안 필수</span></p>
+          <p>지금은 그룹별 토큰 + <code>PINNED_GROUP</code>/<code>PINNED_MODE</code>로 <b>그룹 간 결과 누수를 차단</b>(report 모드는 <code>voc_report_ids</code>만). 벡터 인덱스에서도 깨지면 안 됨 → 모든 청크에 <code>group_id</code> 메타데이터를 박고, 검색 시 pinned 그룹/모드로 <b>메타데이터 필터링을 강제</b>.</p>
+        </div>
+      </div>
+
+      <div class="ritem">
+        <span class="tag">④</span>
+        <div>
+          <p class="ttl">PII · 정보보호 검토 <span class="badge must">민감 데이터</span></p>
+          <p>대상이 <b>사내 인사·전자결재 데이터</b>. 임베딩해 저장하는 순간 <b>민감 사내 데이터의 파생 사본</b>이 생김. 외부 임베딩 API를 쓰면 본문이 제3자로 전송됨 → 자체 호스팅 임베딩으로 회피 가능. (자세한 배경은 §5)</p>
+        </div>
+      </div>
+
+      <div class="ritem">
+        <span class="tag">⑤</span>
+        <div>
+          <p class="ttl">평가 하네스 먼저 <span class="badge first">튜닝의 전제</span></p>
+          <p>정답셋(쿼리→기대 글) 기반 <b>recall@k / precision@k</b>로 <b>현재 키워드 시스템의 베이스라인</b>부터 측정. 대표 실패 케이스 <b>"2022 마이너스 정산"</b>을 회귀 앵커로. 숫자 없으면 "벡터가 낫다"는 신앙이 됩니다.</p>
+        </div>
+      </div>
+
+    </div>
+    <div class="callout" style="margin-top:16px;">
+      <b>검토 결론 형태:</b> ①~⑤를 통과하면 게이트 OK → Phase 1로. ④에서 막히면 <b>자체 호스팅 임베딩으로 설계 제약을 먼저 확정</b>한 뒤 진행.
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section>
+    <div class="sec-head"><span class="sec-num">2</span><h2>벡터 검색에 필요한 작업 (Phase 1 — Hybrid MVP)</h2></div>
+    <table>
+      <thead><tr><th style="width:130px;">단계</th><th>작업</th><th style="width:38%;">권장 / 주의</th></tr></thead>
+      <tbody>
+        <tr><td><b>적재</b></td><td><code>search.total</code> 페이지 순회로 글 수집 → 글마다 <code>fetch_thread_detail</code>로 댓글까지 → "글+댓글" 단위 정규화·청킹</td><td>기존 <code>_classify_resolution</code> · 메타데이터를 청크에 함께 저장</td></tr>
+        <tr><td><b>임베딩</b></td><td>한국어 구어↔공식어 매칭이 목적 → 다국어 품질 중요</td><td><b>BGE-m3 / multilingual-e5</b>(자체 호스팅 → PII 회피) vs Gemini embedding(운영 단순하나 외부 전송)</td></tr>
+        <tr><td><b>벡터 스토어</b></td><td><code>group_id</code> 메타 필터링 + 소규모</td><td><b>pgvector</b>(세션 SQLite/Redis 백로그와 DB 통합) 또는 <b>Qdrant</b>. 대형 분산(Milvus)은 과함</td></tr>
+        <tr><td><b>검색</b></td><td><b>하이브리드</b> — 기존 키워드(BM25/substring) + 벡터를 <b>RRF로 융합</b></td><td>순수 벡터로 갈아엎지 말 것. <code>ABC-123</code>·문서번호는 임베딩이 약하고 키워드가 강함</td></tr>
+        <tr><td><b>재랭킹</b></td><td>기존 <code>_case_quality_score</code>(최신성·댓글 수·처리상태)는 그대로 유지, 검색 위에 얹음</td><td>선택적으로 cross-encoder(<code>bge-reranker</code>) 추가</td></tr>
+        <tr><td><b>통합</b></td><td><code>find_similar_cases</code>를 자체 인덱스 하이브리드 검색으로 교체, <b>feature flag 뒤에서</b></td><td><code>fetch_thread_detail</code>은 신선도 위해 계속 Agit 라이브 호출</td></tr>
+      </tbody>
+    </table>
+    <div class="callout" style="margin-top:16px;">
+      <b>설계 원칙 2가지</b> — ① 기존 키워드 파이프라인(동의어·조사 정규화·고신호 패턴)을 버리지 말고 하이브리드로 흡수. ② 검색(retrieval)과 비즈니스 재랭킹(처리상태/최신성)을 분리 — 이미 코드가 이 구조라 교체가 쉽습니다.
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section>
+    <div class="sec-head"><span class="sec-num">3</span><h2>Graph RAG — 솔직한 평가</h2></div>
+    <p class="lead">직관은 맞는 부분이 있습니다. 다만 <b class="rec">"바로 Graph RAG부터"는 권하지 않습니다.</b></p>
+    <div class="pc">
+      <div class="box good">
+        <h4>✓ 실제로 빛나는 곳</h4>
+        <ul>
+          <li><b>처리 계보</b>: "이 유형은 보통 어떻게 처리됐나" → 이슈→처리방식→재사용 답변 다홉 탐색 (이미 처리상태 분류 중이라 엣지로 자연 연결)</li>
+          <li><b>문서 간 교차 추론</b>: 정산서 이슈 ↔ 관련 결재선/전표 이슈 — 순수 벡터가 놓치는 부분</li>
+          <li><b>엔티티 집계</b>: "LDAP 권한 관련 모든 문의"를 그룹 넘어 엔티티 기준으로</li>
+        </ul>
+      </div>
+      <div class="box bad">
+        <h4>✕ 과한 / 위험한 부분</h4>
+        <ul>
+          <li><b>그래프 구축 비용</b>: 한국어 자유 텍스트에서 LLM 엔티티 추출 → 전체 코퍼스 + 증분마다. 비용·오류·유지보수 부담</li>
+          <li><b>핵심 유스케이스는 벡터로 80% 커버</b>: "유사 사례로 답변 초안"은 포인트 조회 → 하이브리드 + 메타 필터로 대부분 해결</li>
+          <li><b>집계 수요는 이미 일부 충족</b>: VOC 리포트 모드의 <code>per_group_counts</code>·<code>get_group_task_stats</code></li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout" style="margin-top:16px;">
+      <b>권고 — 단계적 + "GraphRAG-lite":</b> 그래프는 나중에, 자유 텍스트 LLM 추출이 아니라 <b>이미 뽑고 있는 구조화 메타(문서유형·시스템·처리상태)</b> 위에 가벼운 "메타데이터 그래프"로 올리면 구축비용 없이 multi-hop·엔티티 집계를 얻습니다. 풀 Graph RAG(community detection·global summary)는 집계형 질문이 실제 요구사항으로 올라올 때만.
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section>
+    <div class="sec-head"><span class="sec-num">4</span><h2>제안 로드맵</h2></div>
+    <div class="road">
+      <div class="phase"><div><span class="ph">Phase 0<small>검토</small></span></div><p>데이터 접근 PoC · 데이터 프로파일링 · PII/컴플라이언스 검토 · 평가 하네스 + 현재 시스템 베이스라인 → <b>결정 게이트</b></p></div>
+      <div class="phase p1"><div><span class="ph">Phase 1<small>MVP</small></span></div><p>적재 → pgvector/Qdrant → 임베딩 → <b>하이브리드(RRF)</b> → 기존 재랭킹 재사용. feature flag 뒤에서 <b>베이스라인 대비 측정</b></p></div>
+      <div class="phase"><div><span class="ph">Phase 2<small>강화</small></span></div><p>cross-encoder 재랭킹 · 증분 싱크 자동화 · 캐싱</p></div>
+      <div class="phase"><div><span class="ph">Phase 3<small>선택</small></span></div><p>메타데이터 그래프(multi-hop / 엔티티) → 수요 확인 시에만 풀 Graph RAG</p></div>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section>
+    <div class="sec-head"><span class="sec-num">5</span><h2>부록 — PII/컴플라이언스 검토는 어떤 배경에서?</h2></div>
+    <p class="lead">외부에서 받은 요구사항이 아니라, <b>코드베이스의 신호로부터 추론한 리스크 플래그</b>입니다. 근거 4가지:</p>
+    <div class="grid2">
+      <div class="card"><p style="margin:0;"><b>① 데이터 출처가 사내 시스템</b><br /><span style="color:var(--gray-600);font-size:14px;">시스템 프롬프트: "카카오/디케이테크인 <b>사내</b> 아지트 데이터" — 공개 데이터가 아님</span></p></div>
+      <div class="card"><p style="margin:0;"><b>② 다루는 그룹이 인사·전자결재</b><br /><span style="color:var(--gray-600);font-size:14px;"><code>AGIT_TOKEN_ELEC</code>(전자결재) · <code>AGIT_TOKEN_HR</code>(인사 시스템) — 민감정보 대표 카테고리</span></p></div>
+      <div class="card"><p style="margin:0;"><b>③ 문서 유형이 개인·재무 정보</b><br /><span style="color:var(--gray-600);font-size:14px;">정산서·법인카드·전표·휴가/연차·발령·결재선 — 급여·정산·인사 기록</span></p></div>
+      <div class="card"><p style="margin:0;"><b>④ 시스템이 "격리"를 보안요건으로 취급</b><br /><span style="color:var(--gray-600);font-size:14px;"><code>PINNED_GROUP</code> 강제 override·그룹별 토큰 분리 = 접근통제 대상임을 설계가 전제</span></p></div>
+    </div>
+
+    <h3>왜 "벡터 RAG로 가면" 새로 문제가 되나</h3>
+    <table>
+      <thead><tr><th></th><th>현재 (stateless 프록시)</th><th>벡터 RAG</th></tr></thead>
+      <tbody>
+        <tr><td><b>데이터 보유</b></td><td>안 들고 있음 — 결과만 중계</td><td><b>파생 사본을 영구 저장</b></td></tr>
+        <tr><td><b>접근통제 위치</b></td><td>Agit가 토큰 단위로 강제</td><td>우리 벡터 DB가 직접 책임</td></tr>
+        <tr><td><b>외부 전송</b></td><td>없음 (검색은 Agit 내부)</td><td>외부 임베딩 API 쓰면 <b>본문이 제3자로 전송</b></td></tr>
+      </tbody>
+    </table>
+    <div class="callout warn" style="margin-top:16px;">
+      <b>이건 차단 사유가 아니라 "설계 제약을 미리 확정하라"는 신호입니다.</b> 제가 법적 의무 문서를 본 게 아니라 단정이 아닌 플래그이며, 실제 적용 강도는 사내 정책에 달렸습니다. 다만 임베딩 모델 선택(자체 호스팅 vs 외부)·저장소 위치 같은 <b>번복하기 비싼 결정</b>이 흔들리지 않도록 Phase 0에서 짚는 게 맞습니다. 데이터 민감도가 낮거나 사내 정책이 이미 정해져 있다면 가볍게 넘겨도 됩니다.
+    </div>
+  </section>
+
+  <footer>
+    Agit CS·VOC 챗봇 — 벡터 검색 / Graph RAG 전환 검토 · 본 문서는 검토(Phase 0) 산출물의 요약본입니다.
+  </footer>
+
+</div>
+</body>
+</html>

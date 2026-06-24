@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agit CS·VOC 챗봇</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+</head>
+<body>
+
+{% set module_icons = {"전자결재": "🗂️", "인사 시스템": "👥"} %}
+{% set module_descs = {"전자결재": "전자결재시스템 개선·버그 요청", "인사 시스템": "인사 시스템 관련 문의·이슈"} %}
+{% set tool_descs = {
+  "search_posts": "아지트 글을 키워드·그룹 기준으로 검색합니다.",
+  "list_available_groups": "챗봇이 조회할 수 있는 모듈과 하위 아지트 그룹을 확인합니다.",
+  "find_similar_cases": "새 CS 문의와 유사한 과거 사례를 찾아 답변 근거를 구성합니다.",
+  "get_group_stats": "선택 그룹의 전체 글 수와 최근 글 샘플을 조회합니다.",
+  "get_group_task_stats": "기간별 전체 글 수와 요청·진행·완료 상태별 건수를 페이지 순회로 집계합니다.",
+  "fetch_thread_detail": "특정 글의 본문과 댓글을 상세 조회해 처리 결말을 확인합니다."
+} %}
+
+<!-- ──────────────────────────────────────────────────────────
+     SIDEBAR — Light, ERP-style LNB
+     ────────────────────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <button type="button" class="sidebar-toggle" aria-label="메뉴 토글">☰</button>
+    <div class="brand">
+      <span class="brand-icon">🤖</span>
+      <span class="brand-name">Agit CS Bot</span>
+    </div>
+    <span class="brand-tag">BOT</span>
+  </div>
+
+  <nav class="nav">
+    <div class="nav-section">
+      <div class="nav-section-title">메인</div>
+      <div class="module-list" id="module-list">
+        {% for g in groups %}
+        <button type="button" class="nav-item module-item" data-group="{{ g }}">
+          <span class="nav-item-icon">{{ module_icons.get(g, '📁') }}</span>
+          <span class="nav-item-label">{{ g }}</span>
+          <span class="module-status" data-module-status="{{ g }}" aria-live="polite"></span>
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-section-title">분석</div>
+      <a class="nav-item" href="/dashboard">
+        <span class="nav-item-icon">📊</span>
+        <span class="nav-item-label">처리현황 대시보드</span>
+      </a>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-section-title">세션</div>
+      <button type="button" class="nav-item" id="reset-btn">
+        <span class="nav-item-icon">↻</span>
+        <span class="nav-item-label">새 대화</span>
+      </button>
+    </div>
+
+    <div class="nav-section nav-section-tools">
+      <div class="nav-section-title">연결된 도구 ({{ tools|length }})</div>
+      {% for t in tools %}
+      {% set desc = tool_descs.get(t, "도구 기능 설명이 등록되지 않았습니다.") %}
+      <div class="nav-item nav-item-static nav-item-mono tool-nav-item" title="{{ desc }}" tabindex="0" aria-label="{{ t }}: {{ desc }}">
+        <span class="dot dot-success"></span><span class="nav-item-label">{{ t }}</span>
+        <span class="tool-nav-tooltip" role="tooltip">{{ desc }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="user-card">
+      <div class="user-avatar">{{ user_name[0]|upper if user_name else 'U' }}</div>
+      <div class="user-info">
+        <div class="user-name">{{ user_name }}</div>
+        <div class="user-sub" title="모델">{{ model }}</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ──────────────────────────────────────────────────────────
+     MAIN
+     ────────────────────────────────────────────────────────── -->
+<main class="main">
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="module-indicator" id="module-indicator">
+        <span class="module-indicator-icon" id="module-indicator-icon">📁</span>
+        <span class="module-indicator-label" id="module-indicator-label">모듈을 선택하세요</span>
+        <span class="module-indicator-sep">·</span>
+        <span class="module-indicator-mode" id="module-indicator-mode">답변 가이드</span>
+      </span>
+    </div>
+    <div class="topbar-right">
+      <div class="model-selector" id="model-selector">
+        <button type="button" class="model-trigger" id="model-trigger" aria-haspopup="listbox" aria-expanded="false">
+          <span class="model-trigger-icon">🧠</span>
+          <span class="model-trigger-label" id="model-trigger-label">{{ model }}</span>
+          <span class="model-trigger-caret">▾</span>
+        </button>
+        <div class="model-menu is-hidden" id="model-menu" role="listbox">
+          <div class="model-menu-heading">Gemini 모델 선택</div>
+          {% for m in models %}
+          <button type="button" class="model-option" data-model="{{ m.id }}" role="option" aria-selected="false">
+            <span class="model-option-top">
+              <span class="model-option-label">{{ m.label }}</span>
+              <span class="model-option-tier tier-{{ m.tier }}">{{ m.tier }}</span>
+            </span>
+            <span class="model-option-id">{{ m.id }}</span>
+            <span class="model-option-desc">{{ m.desc }}</span>
+            <span class="model-option-check" aria-hidden="true">✓</span>
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+      <span id="status-badge" class="badge badge-success">● 정상</span>
+    </div>
+  </header>
+
+  <div class="mode-tabs" id="mode-tabs">
+    <button type="button" class="mode-tab active" data-mode="guide">💬 답변 가이드</button>
+    <button type="button" class="mode-tab" data-mode="report">📑 VOC 리포트</button>
+    <button type="button" class="mode-tab" data-mode="stats">📈 통계 리포트</button>
+    <span class="mode-hint" id="mode-hint">새 CS 문의에 대한 답변 초안을 만들어 드립니다.</span>
+  </div>
+  <div class="stats-panel is-hidden" id="stats-panel">
+    <div class="stats-fields">
+      <label class="stats-field stats-field-wide">
+        <span>조회 그룹</span>
+        <select id="stats-group" class="stats-select"></select>
+      </label>
+      <label class="stats-field">
+        <span>시작일</span>
+        <input type="date" id="stats-start" class="stats-date" />
+      </label>
+      <label class="stats-field">
+        <span>종료일</span>
+        <input type="date" id="stats-end" class="stats-date" />
+      </label>
+      <label class="stats-check">
+        <input type="checkbox" id="stats-exclude-bot" />
+        <span>봇 작성 글 제외</span>
+      </label>
+    </div>
+    <button type="button" class="stats-run-btn" id="stats-run-btn">요약 보고서 생성</button>
+  </div>
+
+  <section class="chat-container">
+    <!-- 환영 상태 — 첫 메시지 전까지만 노출. data-prompt를 가진 카드는 자동 채움. -->
+    <div id="welcome-state" class="welcome-state">
+      <div class="welcome-heading">
+        <h2 id="welcome-title">모듈을 선택하세요</h2>
+        <p id="welcome-sub">왼쪽 LNB에서 작업할 모듈을 먼저 선택하면, 해당 모듈에 맞는 추천 액션이 표시됩니다.</p>
+      </div>
+      <div class="suggest-grid" id="suggest-grid">
+        <button type="button" class="suggest-card" data-prompt="다음 CS 문의에 답변 가이드를 만들어줘:&#10;[여기에 문의 내용을 붙여넣으세요]">
+          <div class="suggest-card-icon">💬</div>
+          <div class="suggest-card-title">답변 가이드 만들기</div>
+          <div class="suggest-card-desc">새 CS 문의 → 과거 사례 → 권장 답변 초안</div>
+        </button>
+        <button type="button" class="suggest-card" data-prompt="이 모듈의 최근 30건으로 VOC 리포트를 작성해줘">
+          <div class="suggest-card-icon">📑</div>
+          <div class="suggest-card-title">VOC 리포트 발행</div>
+          <div class="suggest-card-desc">최근 30건으로 자동 통계·이슈 리포트</div>
+        </button>
+        <button type="button" class="suggest-card" data-prompt="이 모듈의 현재 글 현황(총 건수, 최근 샘플)을 보여줘">
+          <div class="suggest-card-icon">📊</div>
+          <div class="suggest-card-title">그룹 현황 확인</div>
+          <div class="suggest-card-desc">총 글 수와 최근 게시물 샘플 5건</div>
+        </button>
+        <button type="button" class="suggest-card" data-prompt="이 모듈에서 최근 릴리즈노트/공지를 5건 보여줘">
+          <div class="suggest-card-icon">📋</div>
+          <div class="suggest-card-title">최근 공지 5건</div>
+          <div class="suggest-card-desc">릴리즈노트·공지사항 빠른 조회</div>
+        </button>
+      </div>
+      <div class="recent-questions is-hidden" id="recent-questions">
+        <div class="recent-heading">최근 질문</div>
+        <div class="recent-list" id="recent-list"></div>
+      </div>
+    </div>
+
+    <div id="messages" class="messages"></div>
+
+    <form id="chat-form" class="input-area">
+      <div class="input-wrap">
+        <textarea
+          id="input"
+          class="input"
+          placeholder="질문을 입력하세요... (Shift+Enter: 줄바꿈, Enter: 전송)"
+          rows="1"
+          autocomplete="off"
+        ></textarea>
+        <button type="submit" id="send-btn" class="send-btn">
+          <span class="send-label">전송</span>
+          <span class="send-arrow">→</span>
+        </button>
+      </div>
+      <div class="image-attachments is-hidden" id="image-attachments" aria-live="polite"></div>
+      <div class="input-hint">
+        도구 자동 호출: <code>search_posts</code> · <code>find_similar_cases</code> · <code>fetch_thread_detail</code> · <code>get_group_stats</code> · <code>get_group_task_stats</code> · 캡처 이미지는 입력창에 붙여넣기
+      </div>
+    </form>
+  </section>
+</main>
+
+<!-- TEMPLATES -->
+<template id="message-user-tmpl">
+  <div class="message message-user">
+    <div class="message-body">
+      <div class="message-content"></div>
+    </div>
+    <div class="message-avatar">👤</div>
+  </div>
+</template>
+
+<template id="message-bot-tmpl">
+  <div class="message message-bot">
+    <div class="message-avatar">🤖</div>
+    <div class="message-body">
+      <div class="message-author">Agit CS Bot</div>
+      <div class="message-tools"></div>
+      <div class="message-content"></div>
+      <div class="message-actions"></div>
+    </div>
+  </div>
+</template>
+
+<template id="message-loading-tmpl">
+  <div class="message message-bot message-loading">
+    <div class="message-avatar">🤖</div>
+    <div class="message-body">
+      <div class="loading-panel">
+        <div class="loading-dots"><span></span><span></span><span></span></div>
+        <div class="loading-copy">
+          <div class="loading-title">과거 사례를 살펴보는 중입니다</div>
+          <div class="loading-status" id="loading-status">보통 10-20초 정도 걸려요.</div>
+          <div class="loading-track"><span id="loading-progress"></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+  window.__MODULE_ICONS__ = {{ module_icons | tojson }};
+  window.__MODULE_DESCS__ = {{ module_descs | tojson }};
+  window.__AVAILABLE_GROUPS__ = {{ groups | tojson }};
+  window.__STATS_GROUP_OPTIONS__ = {{ stats_group_options | tojson }};
+  window.__MODELS__ = {{ models | tojson }};
+  window.__DEFAULT_MODEL__ = {{ model | tojson }};
+</script>
+<script src="/static/app.js"></script>
+</body>
+</html>

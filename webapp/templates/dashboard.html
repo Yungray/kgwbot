@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>처리현황 대시보드 — Agit CS Bot</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css" />
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+
+<!-- ──────────────────────────────────────────────────────────
+     SIDEBAR — 챗봇과 동일한 LNB 컴포넌트 재사용
+     ────────────────────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="brand">
+      <span class="brand-icon">🤖</span>
+      <span class="brand-name">Agit CS Bot</span>
+    </div>
+    <span class="brand-tag">BOT</span>
+  </div>
+
+  <nav class="nav">
+    <div class="nav-section">
+      <div class="nav-section-title">분석</div>
+      <a class="nav-item active" href="/dashboard">
+        <span class="nav-item-icon">📊</span>
+        <span class="nav-item-label">처리현황 대시보드</span>
+      </a>
+    </div>
+    <div class="nav-section">
+      <div class="nav-section-title">메인</div>
+      <a class="nav-item" href="/">
+        <span class="nav-item-icon">💬</span>
+        <span class="nav-item-label">CS 챗봇</span>
+      </a>
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="user-card">
+      <div class="user-avatar">{{ user_name[0]|upper if user_name else 'U' }}</div>
+      <div class="user-info">
+        <div class="user-name">{{ user_name }}</div>
+        <div class="user-sub" title="모델">{{ model }}</div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- ──────────────────────────────────────────────────────────
+     MAIN
+     ────────────────────────────────────────────────────────── -->
+<main class="main"
+      data-default-group="{{ default_group }}"
+      data-default-target="{{ default_target_id }}">
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="module-indicator">
+        <span class="module-indicator-icon">📊</span>
+        <span class="module-indicator-label">처리현황 대시보드</span>
+        <span class="module-indicator-sep">·</span>
+        <span class="module-indicator-mode">요청 · 진행 · 완료 · 승인</span>
+      </span>
+    </div>
+    <div class="topbar-right">
+      <span id="dash-status" class="badge badge-indigo">대기</span>
+    </div>
+  </header>
+
+  <div class="dash-body">
+    <!-- CONTROLS -->
+    <div class="dash-controls">
+      <label class="dash-field">
+        <span>모듈</span>
+        <select id="dash-group">
+          {% for g in groups %}
+          <option value="{{ g }}">{{ g }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="dash-field">
+        <span>하위 아지트</span>
+        <select id="dash-target"></select>
+      </label>
+      <label class="dash-field">
+        <span>시작일</span>
+        <input type="date" id="dash-start" />
+      </label>
+      <label class="dash-field">
+        <span>종료일</span>
+        <input type="date" id="dash-end" />
+      </label>
+      <label class="dash-check">
+        <input type="checkbox" id="dash-exclude-bot" />
+        <span>봇 글 제외</span>
+      </label>
+      <label class="dash-check">
+        <input type="checkbox" id="dash-compare" checked />
+        <span>전 기간 대비</span>
+      </label>
+      <label class="dash-check">
+        <input type="checkbox" id="dash-ai" checked />
+        <span>AI 요약</span>
+      </label>
+      <button type="button" id="dash-run" class="dash-btn">조회</button>
+      <button type="button" id="dash-refresh" class="dash-btn-ghost" title="캐시 무시하고 새로고침">↻ 새로고침</button>
+    </div>
+
+    <!-- DATE PRESETS -->
+    <div class="dash-presets" id="dash-presets">
+      <button type="button" class="preset-chip" data-preset="7">최근 7일</button>
+      <button type="button" class="preset-chip" data-preset="30">최근 30일</button>
+      <button type="button" class="preset-chip" data-preset="this-month">이번 달</button>
+      <button type="button" class="preset-chip" data-preset="last-month">지난 달</button>
+    </div>
+
+    <!-- ERROR BANNER -->
+    <div id="dash-error" class="dash-banner" hidden></div>
+
+    <!-- LOADING -->
+    <div id="dash-loading" class="dash-loading" hidden>
+      <span class="dash-spinner"></span>
+      <span>집계 중… 페이지 전수 순회 + 상태별 병렬 집계</span>
+    </div>
+
+    <!-- EMPTY -->
+    <div id="dash-empty" class="dash-empty">
+      <div class="dash-empty-icon">📈</div>
+      <p>모듈·기간을 선택하고 <b>조회</b>를 누르면 처리현황이 표시됩니다.</p>
+    </div>
+
+    <!-- RESULTS -->
+    <section id="dash-results" hidden>
+      <div class="dash-meta">
+        <span id="dash-meta"></span>
+        <span id="dash-fresh" class="dash-fresh"></span>
+      </div>
+
+      <!-- STAT CARDS -->
+      <div class="stat-grid" id="dash-cards"></div>
+
+      <!-- CHARTS row 1 -->
+      <div class="dash-charts">
+        <div class="dash-card chart-card">
+          <div class="dash-card-label">상태 분포</div>
+          <div class="chart-wrap"><canvas id="dash-donut"></canvas></div>
+        </div>
+        <div class="dash-card chart-card">
+          <div class="dash-card-label">상태별 건수</div>
+          <div class="chart-wrap"><canvas id="dash-bar"></canvas></div>
+        </div>
+      </div>
+
+      <!-- CHARTS row 2 -->
+      <div class="dash-card chart-card">
+        <div class="dash-card-label">일별 신규 글 추세</div>
+        <div class="chart-wrap chart-wrap-wide"><canvas id="dash-trend"></canvas></div>
+      </div>
+      <div class="dash-card chart-card">
+        <div class="dash-card-label">양식별 건수 (Top 8)</div>
+        <div class="chart-wrap chart-wrap-wide"><canvas id="dash-template"></canvas></div>
+      </div>
+
+      <!-- PER-GROUP TABLE -->
+      <div class="dash-card">
+        <div class="dash-card-label">하위 아지트별 내역</div>
+        <table class="dash-table">
+          <thead><tr><th>하위 아지트</th><th>전체 글</th></tr></thead>
+          <tbody id="dash-table-body"></tbody>
+        </table>
+      </div>
+
+      <!-- RAW ROWS -->
+      <div class="dash-card">
+        <div class="dash-rows-head">
+          <div class="dash-card-label" style="margin:0">원본 글 목록 <span id="dash-rows-count" class="dash-rows-count"></span><span id="dash-ai-status" class="dash-ai-status"></span></div>
+          <div class="dash-rows-actions">
+            <input type="search" id="dash-search" class="dash-search" placeholder="내용·양식·작성자 검색" />
+            <button type="button" id="dash-csv" class="dash-btn-ghost">CSV 내보내기</button>
+          </div>
+        </div>
+        <div class="dash-filter" id="dash-filter">
+          <button type="button" class="filter-chip active" data-status="전체">전체</button>
+          <button type="button" class="filter-chip" data-status="요청">요청</button>
+          <button type="button" class="filter-chip" data-status="진행">진행</button>
+          <button type="button" class="filter-chip" data-status="완료">완료</button>
+          <button type="button" class="filter-chip" data-status="승인">승인</button>
+          <button type="button" class="filter-chip" data-status="비task">비task</button>
+        </div>
+        <div class="dash-rows-scroll">
+          <table class="dash-table dash-rows-table">
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="created_at">작성일</th>
+                <th class="sortable" data-sort="status">상태</th>
+                <th class="sortable" data-sort="corp">요청 법인</th>
+                <th class="sortable" data-sort="template_name">양식</th>
+                <th>내용</th>
+                <th>AI 요약</th>
+                <th class="sortable" data-sort="author">작성자</th>
+                <th class="sortable" data-sort="children_count">댓글</th>
+                <th>링크</th>
+              </tr>
+            </thead>
+            <tbody id="dash-rows-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script type="application/json" id="dash-group-options">{{ group_options|tojson }}</script>
+<script src="/static/dashboard.js"></script>
+</body>
+</html>

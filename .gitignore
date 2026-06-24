@@ -1,0 +1,16 @@
+# 시크릿 — 절대 커밋 금지 (Agit 토큰 / Gemini 키)
+.env
+.env.*
+!.env.example
+
+# 파이썬
+.venv/
+__pycache__/
+*.pyc
+
+# 대용량/불필요
+*.zip
+
+# Vercel / 로컬
+.vercel/
+.DS_Store
