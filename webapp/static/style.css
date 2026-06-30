@@ -223,6 +223,89 @@ a:hover { text-decoration: underline; }
   background: rgba(255, 255, 255, 0.18);
 }
 
+/* 모듈 — 전역 컨텍스트 스위처 (LNB 상단 고정) */
+.lnb-module {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--gray-300);
+  border-radius: 9px;
+  background: var(--indigo-50);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.lnb-module:focus-within {
+  border-color: var(--indigo-400);
+  box-shadow: 0 0 0 3px var(--indigo-50);
+}
+.lnb-module-icon { font-size: 17px; line-height: 1; flex-shrink: 0; }
+.lnb-module-select {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gray-950);
+  cursor: pointer;
+  padding: 0;
+}
+.lnb-module-select:focus { outline: none; }
+.lnb-module-caret {
+  font-size: 11px;
+  color: var(--gray-500);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.lnb-module-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--indigo-500);
+  border: 2px solid var(--white);
+  box-shadow: 0 0 0 1px var(--indigo-200, #C7D2FE);
+}
+.lnb-module-dot[hidden] { display: none; }
+
+/* 업무 모드 항목 — 링크지만 nav-item 룩 유지, 밑줄 제거 */
+a.nav-item, a.nav-item:hover { text-decoration: none; }
+.nav-mode-status:empty { display: none; }
+
+/* 시스템 · 연결된 도구 — 기본 접힘 */
+.nav-tools { width: 100%; }
+.nav-tools-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  list-style: none;
+  cursor: pointer;
+  border-radius: 8px;
+  color: var(--gray-500);
+}
+.nav-tools-summary::-webkit-details-marker { display: none; }
+.nav-tools-summary:hover { background: var(--gray-50); color: var(--gray-700); }
+.nav-tools-title {
+  flex: 1;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.nav-tools-caret {
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+.nav-tools[open] .nav-tools-caret { transform: rotate(180deg); }
+.nav-tools-list { padding-top: 4px; }
+
 .nav-item-static {
   cursor: default;
   color: var(--gray-500);
@@ -357,8 +440,18 @@ a:hover { text-decoration: underline; }
   padding: 0 32px;
   flex-shrink: 0;
 }
-.topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.topbar-left { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; }
 .topbar-right { display: flex; gap: 8px; align-items: center; }
+.topbar-left .mode-hint {
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--gray-500);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
 
 .module-indicator {
   display: inline-flex;

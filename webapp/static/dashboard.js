@@ -4,7 +4,10 @@
 
   const $ = (id) => document.getElementById(id);
   const root = document.querySelector(".main");
-  const groupSel = $("dash-group");
+  const groupSel = $("lnb-module");          // 모듈 = LNB 전역 스위처 (페이지 공유)
+  const moduleIcon = $("lnb-module-icon");
+  const resetBtn = $("reset-btn");
+  const MODULE_ICONS = window.__MODULE_ICONS__ || {};
   const targetSel = $("dash-target");
   const startEl = $("dash-start");
   const endEl = $("dash-end");
@@ -85,12 +88,27 @@
       opts.map((o) => `<option value="${o.id}">${o.title}</option>`).join("");
     if (preferredId && opts.some((o) => o.id === preferredId)) targetSel.value = preferredId;
   }
+  function syncModuleIcon() {
+    if (moduleIcon) moduleIcon.textContent = MODULE_ICONS[groupSel.value] || "📁";
+  }
   (function initDefaults() {
-    if (DEFAULT_GROUP && GROUP_OPTIONS[DEFAULT_GROUP]) groupSel.value = DEFAULT_GROUP;
+    // 모듈은 챗봇과 공유하는 전역 컨텍스트(localStorage agit_group)를 우선 반영
+    const stored = localStorage.getItem("agit_group") || "";
+    if (stored && GROUP_OPTIONS[stored]) groupSel.value = stored;
+    else if (DEFAULT_GROUP && GROUP_OPTIONS[DEFAULT_GROUP]) groupSel.value = DEFAULT_GROUP;
+    syncModuleIcon();
     populateTargets(groupSel.value, DEFAULT_TARGET);
     setPreset("30");
   })();
-  groupSel.addEventListener("change", () => populateTargets(groupSel.value, ""));
+  // 모듈 전환: 컨텍스트 저장 → 아이콘·하위 아지트 갱신 → 즉시 재조회
+  groupSel.addEventListener("change", () => {
+    localStorage.setItem("agit_group", groupSel.value);
+    syncModuleIcon();
+    populateTargets(groupSel.value, "");
+    run();
+  });
+  // '새 대화'는 대시보드에서 챗봇으로 이동
+  if (resetBtn) resetBtn.addEventListener("click", () => { window.location.href = "/"; });
 
   // ── 상태 배지 ──────────────────────────────────────────────
   function setStatus(text, variant) {

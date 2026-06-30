@@ -12,44 +12,9 @@
 <body>
 
 <!-- ──────────────────────────────────────────────────────────
-     SIDEBAR — 챗봇과 동일한 LNB 컴포넌트 재사용
+     SIDEBAR — 챗봇과 동일한 공통 LNB 파셜 (업무 중심)
      ────────────────────────────────────────────────────────── -->
-<aside class="sidebar">
-  <div class="sidebar-header">
-    <div class="brand">
-      <span class="brand-icon">👨‍💻</span>
-      <span class="brand-name">솔루션개발형님</span>
-    </div>
-    <span class="brand-tag">BOT</span>
-  </div>
-
-  <nav class="nav">
-    <div class="nav-section">
-      <div class="nav-section-title">분석</div>
-      <a class="nav-item active" href="/dashboard">
-        <span class="nav-item-icon">📊</span>
-        <span class="nav-item-label">처리현황 대시보드</span>
-      </a>
-    </div>
-    <div class="nav-section">
-      <div class="nav-section-title">메인</div>
-      <a class="nav-item" href="/">
-        <span class="nav-item-icon">💬</span>
-        <span class="nav-item-label">CS 챗봇</span>
-      </a>
-    </div>
-  </nav>
-
-  <div class="sidebar-footer">
-    <div class="user-card">
-      <div class="user-avatar">{{ user_name[0]|upper if user_name else 'U' }}</div>
-      <div class="user-info">
-        <div class="user-name">{{ user_name }}</div>
-        <div class="user-sub" title="모델">{{ model }}</div>
-      </div>
-    </div>
-  </div>
-</aside>
+{% include "_sidebar.html" %}
 
 <!-- ──────────────────────────────────────────────────────────
      MAIN
@@ -74,14 +39,6 @@
   <div class="dash-body">
     <!-- CONTROLS -->
     <div class="dash-controls">
-      <label class="dash-field">
-        <span>모듈</span>
-        <select id="dash-group">
-          {% for g in groups %}
-          <option value="{{ g }}">{{ g }}</option>
-          {% endfor %}
-        </select>
-      </label>
       <label class="dash-field">
         <span>하위 아지트</span>
         <select id="dash-target"></select>
@@ -215,6 +172,7 @@
 </main>
 
 <script type="application/json" id="dash-group-options">{{ group_options|tojson }}</script>
+<script>window.__MODULE_ICONS__ = {{ module_icons | tojson }};</script>
 <script src="/static/dashboard.js"></script>
 </body>
 </html>

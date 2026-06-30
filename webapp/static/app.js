@@ -12,7 +12,9 @@
   const sessionBadge = $('#session-badge');
   const statusBadge = $('#status-badge');
   const resetBtn = $('#reset-btn');
-  const moduleList = $('#module-list');
+  const moduleSelect = $('#lnb-module');
+  const moduleSwitcherIcon = $('#lnb-module-icon');
+  const moduleDot = $('#lnb-module-dot');
   const moduleIndicatorIcon = $('#module-indicator-icon');
   const moduleIndicatorLabel = $('#module-indicator-label');
   const moduleIndicatorMode = $('#module-indicator-mode');
@@ -132,7 +134,11 @@
     renderModuleStatuses();
   }
 
-  let currentMode = localStorage.getItem('agit_mode') || 'guide';
+  // 초기 모드: 대시보드 등 다른 페이지에서 /?mode=xxx 로 진입하면 그 모드를 우선,
+  // 아니면 마지막으로 쓰던 모드(localStorage), 그것도 없으면 guide.
+  const _navMode = window.__ACTIVE_NAV__;
+  const _urlMode = ['guide', 'report', 'stats'].includes(_navMode) ? _navMode : null;
+  let currentMode = _urlMode || localStorage.getItem('agit_mode') || 'guide';
   let _storedGroup = localStorage.getItem('agit_group') || '';
   let currentGroup = AVAILABLE_GROUPS.includes(_storedGroup) ? _storedGroup : DEFAULT_GROUP;
   let sessionId = getSessionFor(currentGroup, currentMode);
@@ -242,12 +248,12 @@
   }
 
   function renderModuleStatuses() {
-    $$('.module-item').forEach((btn) => {
-      const group = btn.dataset.group;
-      const el = btn.querySelector('.module-status');
-      if (!el) return;
-      const state = getModuleState(group, currentMode);
-      el.className = 'module-status';
+    // 업무(모드) 항목: 현재 모듈의 모드별 상태 배지 — 지금 보고 있는 모드는 비워 둠
+    $$('.nav-mode-status').forEach((el) => {
+      const mode = el.dataset.modeStatus;
+      const state = getModuleState(currentGroup, mode);
+      const isViewing = (mode === currentMode);
+      el.className = 'module-status nav-mode-status';
       el.textContent = '';
       el.title = '';
 
@@ -255,27 +261,40 @@
         el.classList.add('is-pending');
         el.textContent = formatElapsed(Date.now() - state.startedAt, true);
         el.title = '응답 생성 중';
-      } else if (state.status === 'done' && group !== currentGroup) {
+      } else if (state.status === 'done' && !isViewing) {
         el.classList.add('is-done');
         el.textContent = '새 응답';
         el.title = '백그라운드 응답 완료';
-      } else if (state.status === 'error' && group !== currentGroup) {
+      } else if (state.status === 'error' && !isViewing) {
         el.classList.add('is-error');
         el.textContent = '오류';
         el.title = '응답 실패';
-      } else if (state.lastMessageAt) {
+      } else if (!isViewing && state.lastMessageAt) {
         el.classList.add('is-idle');
         el.textContent = formatAgo(state.lastMessageAt);
         el.title = '마지막 대화 시각';
       }
     });
+
+    // 모듈 스위처 dot: 지금 보는 모듈이 아닌 다른 모듈에 진행중/새 응답/오류가 있으면 알림
+    if (moduleDot) {
+      let flag = false;
+      AVAILABLE_GROUPS.forEach((g) => {
+        if (g === currentGroup) return;
+        ['guide', 'report', 'stats'].forEach((m) => {
+          const s = getModuleState(g, m).status;
+          if (s === 'pending' || s === 'done' || s === 'error') flag = true;
+        });
+      });
+      moduleDot.hidden = !flag;
+    }
   }
 
   function applyMode(mode, persist) {
     if (!MODE_LABELS[mode]) mode = 'guide';
     currentMode = mode;
     if (persist) localStorage.setItem('agit_mode', mode);
-    $$('.mode-tab').forEach((b) => {
+    $$('.nav-mode-item').forEach((b) => {
       b.classList.toggle('active', b.dataset.mode === mode);
     });
     if (modeHint) modeHint.textContent = MODE_LABELS[mode].hint;
@@ -384,12 +403,11 @@
     currentGroup = group;
     if (persist) localStorage.setItem('agit_group', currentGroup);
 
-    // 사이드바 active 상태
-    $$('.module-item').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.group === currentGroup);
-    });
-    // topbar 모듈 인디케이터
+    // LNB 전역 모듈 스위처 동기화
     const icon = MODULE_ICONS[currentGroup] || '📁';
+    if (moduleSelect && moduleSelect.value !== currentGroup) moduleSelect.value = currentGroup;
+    if (moduleSwitcherIcon) moduleSwitcherIcon.textContent = icon;
+    // topbar 모듈 인디케이터
     if (moduleIndicatorIcon) moduleIndicatorIcon.textContent = icon;
     if (moduleIndicatorLabel) moduleIndicatorLabel.textContent = currentGroup || '모듈을 선택하세요';
     // 환영 카드 문구
@@ -1033,10 +1051,11 @@
     });
   });
 
-  // 모드 탭 (main 상단)
-  $$('.mode-tab').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      applyMode(btn.dataset.mode, true);
+  // 업무(모드) 항목 (LNB) — 링크지만 같은 페이지에서는 이동 없이 제자리 전환
+  $$('.nav-mode-item').forEach((a) => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      applyMode(a.dataset.mode, true);
     });
   });
 
@@ -1052,13 +1071,9 @@
     });
   }
 
-  // 모듈 카드 (사이드바)
-  if (moduleList) {
-    moduleList.addEventListener('click', (e) => {
-      const item = e.target.closest('.module-item');
-      if (!item) return;
-      applyModule(item.dataset.group, true);
-    });
+  // 모듈 스위처 (LNB 전역 컨텍스트)
+  if (moduleSelect) {
+    moduleSelect.addEventListener('change', () => applyModule(moduleSelect.value, true));
   }
 
   // 모델 셀렉터 (토픽바)
@@ -1122,7 +1137,7 @@
   updateSessionBadge();
   initStatsDates();
   renderStatsGroupOptions(currentGroup);
-  applyMode(currentMode, /*persist*/ false);
+  applyMode(currentMode, /*persist*/ !!_urlMode);
   applyModule(currentGroup, /*persist*/ false);
   applyModel(currentModel, /*persist*/ false);
 

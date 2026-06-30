@@ -12,82 +12,7 @@
 </head>
 <body>
 
-{% set module_icons = {"전자결재": "🗂️", "인사 시스템": "👥"} %}
-{% set module_descs = {"전자결재": "전자결재시스템 개선·버그 요청", "인사 시스템": "인사 시스템 관련 문의·이슈"} %}
-{% set tool_descs = {
-  "search_posts": "아지트 글을 키워드·그룹 기준으로 검색합니다.",
-  "list_available_groups": "챗봇이 조회할 수 있는 모듈과 하위 아지트 그룹을 확인합니다.",
-  "find_similar_cases": "새 CS 문의와 유사한 과거 사례를 찾아 답변 근거를 구성합니다.",
-  "get_group_stats": "선택 그룹의 전체 글 수와 최근 글 샘플을 조회합니다.",
-  "get_group_task_stats": "기간별 전체 글 수와 요청·진행·완료 상태별 건수를 페이지 순회로 집계합니다.",
-  "fetch_thread_detail": "특정 글의 본문과 댓글을 상세 조회해 처리 결말을 확인합니다."
-} %}
-
-<!-- ──────────────────────────────────────────────────────────
-     SIDEBAR — Light, ERP-style LNB
-     ────────────────────────────────────────────────────────── -->
-<aside class="sidebar">
-  <div class="sidebar-header">
-    <button type="button" class="sidebar-toggle" aria-label="메뉴 토글">☰</button>
-    <div class="brand">
-      <span class="brand-icon">👨‍💻</span>
-      <span class="brand-name">솔루션개발형님</span>
-    </div>
-    <span class="brand-tag">BOT</span>
-  </div>
-
-  <nav class="nav">
-    <div class="nav-section">
-      <div class="nav-section-title">메인</div>
-      <div class="module-list" id="module-list">
-        {% for g in groups %}
-        <button type="button" class="nav-item module-item" data-group="{{ g }}">
-          <span class="nav-item-icon">{{ module_icons.get(g, '📁') }}</span>
-          <span class="nav-item-label">{{ g }}</span>
-          <span class="module-status" data-module-status="{{ g }}" aria-live="polite"></span>
-        </button>
-        {% endfor %}
-      </div>
-    </div>
-
-    <div class="nav-section">
-      <div class="nav-section-title">분석</div>
-      <a class="nav-item" href="/dashboard">
-        <span class="nav-item-icon">📊</span>
-        <span class="nav-item-label">처리현황 대시보드</span>
-      </a>
-    </div>
-
-    <div class="nav-section">
-      <div class="nav-section-title">세션</div>
-      <button type="button" class="nav-item" id="reset-btn">
-        <span class="nav-item-icon">↻</span>
-        <span class="nav-item-label">새 대화</span>
-      </button>
-    </div>
-
-    <div class="nav-section nav-section-tools">
-      <div class="nav-section-title">연결된 도구 ({{ tools|length }})</div>
-      {% for t in tools %}
-      {% set desc = tool_descs.get(t, "도구 기능 설명이 등록되지 않았습니다.") %}
-      <div class="nav-item nav-item-static nav-item-mono tool-nav-item" title="{{ desc }}" tabindex="0" aria-label="{{ t }}: {{ desc }}">
-        <span class="dot dot-success"></span><span class="nav-item-label">{{ t }}</span>
-        <span class="tool-nav-tooltip" role="tooltip">{{ desc }}</span>
-      </div>
-      {% endfor %}
-    </div>
-  </nav>
-
-  <div class="sidebar-footer">
-    <div class="user-card">
-      <div class="user-avatar">{{ user_name[0]|upper if user_name else 'U' }}</div>
-      <div class="user-info">
-        <div class="user-name">{{ user_name }}</div>
-        <div class="user-sub" title="모델">{{ model }}</div>
-      </div>
-    </div>
-  </div>
-</aside>
+{% include "_sidebar.html" %}
 
 <!-- ──────────────────────────────────────────────────────────
      MAIN
@@ -101,6 +26,7 @@
         <span class="module-indicator-sep">·</span>
         <span class="module-indicator-mode" id="module-indicator-mode">답변 가이드</span>
       </span>
+      <span class="mode-hint" id="mode-hint">새 CS 문의에 대한 답변 초안을 만들어 드립니다.</span>
     </div>
     <div class="topbar-right">
       <div class="model-selector" id="model-selector">
@@ -128,12 +54,6 @@
     </div>
   </header>
 
-  <div class="mode-tabs" id="mode-tabs">
-    <button type="button" class="mode-tab active" data-mode="guide">💬 답변 가이드</button>
-    <button type="button" class="mode-tab" data-mode="report">📑 VOC 리포트</button>
-    <button type="button" class="mode-tab" data-mode="stats">📈 통계 리포트</button>
-    <span class="mode-hint" id="mode-hint">새 CS 문의에 대한 답변 초안을 만들어 드립니다.</span>
-  </div>
   <div class="stats-panel is-hidden" id="stats-panel">
     <div class="stats-fields">
       <label class="stats-field stats-field-wide">
@@ -260,6 +180,7 @@
   window.__STATS_GROUP_OPTIONS__ = {{ stats_group_options | tojson }};
   window.__MODELS__ = {{ models | tojson }};
   window.__DEFAULT_MODEL__ = {{ model | tojson }};
+  window.__ACTIVE_NAV__ = {{ active_nav | tojson }};
 </script>
 <script src="/static/app.js"></script>
 </body>

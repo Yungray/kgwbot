@@ -652,6 +652,25 @@ BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
+# ───────────────────────────────────────────────────────────
+# 사이드바(LNB) 공통 표시 메타 — index/dashboard가 동일 LNB를 공유한다.
+# ───────────────────────────────────────────────────────────
+MODULE_ICONS = {"전자결재": "🗂️", "인사 시스템": "👥"}
+MODULE_DESCS = {
+    "전자결재": "전자결재시스템 개선·버그 요청",
+    "인사 시스템": "인사 시스템 관련 문의·이슈",
+}
+TOOL_DESCS = {
+    "search_posts": "아지트 글을 키워드·그룹 기준으로 검색합니다.",
+    "list_available_groups": "챗봇이 조회할 수 있는 모듈과 하위 아지트 그룹을 확인합니다.",
+    "find_similar_cases": "새 CS 문의와 유사한 과거 사례를 찾아 답변 근거를 구성합니다.",
+    "get_group_stats": "선택 그룹의 전체 글 수와 최근 글 샘플을 조회합니다.",
+    "get_group_task_stats": "기간별 전체 글 수와 요청·진행·완료 상태별 건수를 페이지 순회로 집계합니다.",
+    "fetch_thread_detail": "특정 글의 본문과 댓글을 상세 조회해 처리 결말을 확인합니다.",
+}
+# LNB '업무' 항목으로 노출되는 챗봇 모드
+CHAT_MODES = {"guide", "report", "stats"}
+
 
 class ChatRequest(BaseModel):
     message: str
@@ -672,17 +691,22 @@ class ChatResponse(BaseModel):
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
+async def index(request: Request, mode: str = "guide"):
     user_id = (os.environ.get("AGIT_USER_ID") or "").strip()
     user_name = (os.environ.get("AGIT_USER_NAME") or "").strip()
     if not user_name:
         user_name = f"User #{user_id}" if user_id else "운영자"
+    active_nav = mode if mode in CHAT_MODES else "guide"
     return templates.TemplateResponse(
         request,
         "index.html",
         {
             "groups": list(GROUPS.keys()),
             "tools": [t.__name__ for t in TOOLS],
+            "tool_descs": TOOL_DESCS,
+            "module_icons": MODULE_ICONS,
+            "module_descs": MODULE_DESCS,
+            "active_nav": active_nav,
             "model": DEFAULT_MODEL,
             "models": AVAILABLE_MODELS,
             "stats_group_options": {
@@ -891,6 +915,10 @@ async def dashboard(request: Request):
             "group_options": _dashboard_group_options(),
             "default_group": DASHBOARD_DEFAULT_GROUP,
             "default_target_id": DASHBOARD_DEFAULT_TARGET_ID,
+            "tools": [t.__name__ for t in TOOLS],
+            "tool_descs": TOOL_DESCS,
+            "module_icons": MODULE_ICONS,
+            "active_nav": "dashboard",
             "model": DEFAULT_MODEL,
             "user_name": user_name,
         },

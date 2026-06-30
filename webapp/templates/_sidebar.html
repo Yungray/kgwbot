@@ -1,0 +1,96 @@
+{# ───────────────────────────────────────────────────────────
+   공통 LNB — 업무 중심 네비게이션
+   컨텍스트: groups, module_icons, tools, tool_descs, user_name, model, active_nav
+   active_nav ∈ {guide, report, stats, dashboard}
+   · 모듈은 전역 컨텍스트 스위처(select)로 상단 고정 — index/dashboard 공유
+   · '업무' 항목은 링크(<a>): index에서는 JS가 가로채 제자리 모드 전환,
+     dashboard에서는 실제 /?mode=... 이동
+   ─────────────────────────────────────────────────────────── #}
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="brand">
+      <span class="brand-icon">👨‍💻</span>
+      <span class="brand-name">솔루션개발형님</span>
+    </div>
+    <span class="brand-tag">BOT</span>
+  </div>
+
+  <nav class="nav">
+    {# ── 모듈: 전역 컨텍스트 스위처 ── #}
+    <div class="nav-section">
+      <div class="nav-section-title">모듈</div>
+      <div class="lnb-module">
+        <span class="lnb-module-icon" id="lnb-module-icon">{{ module_icons.get(groups[0], '📁') if groups else '📁' }}</span>
+        <select id="lnb-module" class="lnb-module-select" aria-label="작업할 모듈 선택">
+          {% for g in groups %}
+          <option value="{{ g }}">{{ g }}</option>
+          {% endfor %}
+        </select>
+        <span class="lnb-module-caret" aria-hidden="true">▾</span>
+        <span class="lnb-module-dot" id="lnb-module-dot" title="다른 모듈에 새 응답이 있습니다" hidden></span>
+      </div>
+    </div>
+
+    {# ── 업무: 사용자가 하려는 일 ── #}
+    <div class="nav-section">
+      <div class="nav-section-title">업무</div>
+      <a class="nav-item nav-mode-item{{ ' active' if active_nav == 'guide' else '' }}" data-mode="guide" href="/?mode=guide">
+        <span class="nav-item-icon">💬</span>
+        <span class="nav-item-label">답변 가이드</span>
+        <span class="module-status nav-mode-status" data-mode-status="guide" aria-live="polite"></span>
+      </a>
+      <a class="nav-item nav-mode-item{{ ' active' if active_nav == 'report' else '' }}" data-mode="report" href="/?mode=report">
+        <span class="nav-item-icon">📑</span>
+        <span class="nav-item-label">VOC 리포트</span>
+        <span class="module-status nav-mode-status" data-mode-status="report" aria-live="polite"></span>
+      </a>
+      <a class="nav-item nav-mode-item{{ ' active' if active_nav == 'stats' else '' }}" data-mode="stats" href="/?mode=stats">
+        <span class="nav-item-icon">📈</span>
+        <span class="nav-item-label">통계 리포트</span>
+        <span class="module-status nav-mode-status" data-mode-status="stats" aria-live="polite"></span>
+      </a>
+      <a class="nav-item{{ ' active' if active_nav == 'dashboard' else '' }}" data-nav="dashboard" href="/dashboard">
+        <span class="nav-item-icon">📊</span>
+        <span class="nav-item-label">처리현황 대시보드</span>
+      </a>
+    </div>
+
+    {# ── 세션 ── #}
+    <div class="nav-section">
+      <div class="nav-section-title">세션</div>
+      <button type="button" class="nav-item" id="reset-btn">
+        <span class="nav-item-icon">↻</span>
+        <span class="nav-item-label">새 대화</span>
+      </button>
+    </div>
+
+    {# ── 시스템 · 연결된 도구 (기본 접힘으로 LNB 정돈) ── #}
+    <div class="nav-section nav-section-tools">
+      <details class="nav-tools">
+        <summary class="nav-tools-summary">
+          <span class="nav-tools-title">시스템 · 연결된 도구 {{ tools|length }}</span>
+          <span class="nav-tools-caret" aria-hidden="true">▾</span>
+        </summary>
+        <div class="nav-tools-list">
+          {% for t in tools %}
+          {% set desc = tool_descs.get(t, "도구 기능 설명이 등록되지 않았습니다.") %}
+          <div class="nav-item nav-item-static nav-item-mono tool-nav-item" title="{{ desc }}" tabindex="0" aria-label="{{ t }}: {{ desc }}">
+            <span class="dot dot-success"></span><span class="nav-item-label">{{ t }}</span>
+            <span class="tool-nav-tooltip" role="tooltip">{{ desc }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+    </div>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="user-card">
+      <div class="user-avatar">{{ user_name[0]|upper if user_name else 'U' }}</div>
+      <div class="user-info">
+        <div class="user-name">{{ user_name }}</div>
+        <div class="user-sub" title="모델">{{ model }}</div>
+      </div>
+    </div>
+  </div>
+</aside>
