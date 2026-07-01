@@ -29,6 +29,7 @@
       <span class="mode-hint" id="mode-hint">새 CS 문의에 대한 답변 초안을 만들어 드립니다.</span>
     </div>
     <div class="topbar-right">
+      <button type="button" class="top-reset-btn" id="top-reset-btn" title="현재 모듈의 대화를 새로 시작합니다">새 대화</button>
       <div class="model-selector" id="model-selector">
         <button type="button" class="model-trigger" id="model-trigger" aria-haspopup="listbox" aria-expanded="false">
           <span class="model-trigger-icon">🧠</span>
@@ -36,7 +37,7 @@
           <span class="model-trigger-caret">▾</span>
         </button>
         <div class="model-menu is-hidden" id="model-menu" role="listbox">
-          <div class="model-menu-heading">Gemini 모델 선택</div>
+          <div class="model-menu-heading">Gemini 모델 선택 · 용도별</div>
           {% for m in models %}
           <button type="button" class="model-option" data-model="{{ m.id }}" role="option" aria-selected="false">
             <span class="model-option-top">
@@ -129,7 +130,9 @@
       </div>
       <div class="image-attachments is-hidden" id="image-attachments" aria-live="polite"></div>
       <div class="input-hint">
-        도구 자동 호출: <code>search_posts</code> · <code>find_similar_cases</code> · <code>fetch_thread_detail</code> · <code>get_group_stats</code> · <code>get_group_task_stats</code> · 캡처 이미지는 입력창에 붙여넣기
+        <span class="input-hint-chip">캡처 이미지는 입력창에 붙여넣기</span>
+        <span class="input-hint-chip">Enter 전송</span>
+        <span class="input-hint-chip">Shift+Enter 줄바꿈</span>
       </div>
     </form>
   </section>
@@ -166,6 +169,11 @@
         <div class="loading-copy">
           <div class="loading-title">과거 사례를 살펴보는 중입니다</div>
           <div class="loading-status" id="loading-status">보통 10-20초 정도 걸려요.</div>
+          <div class="loading-steps" aria-hidden="true">
+            <span>질문 분석</span>
+            <span>사례 검색</span>
+            <span>답변 작성</span>
+          </div>
           <div class="loading-track"><span id="loading-progress"></span></div>
         </div>
       </div>

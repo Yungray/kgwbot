@@ -12,6 +12,7 @@
   const sessionBadge = $('#session-badge');
   const statusBadge = $('#status-badge');
   const resetBtn = $('#reset-btn');
+  const topResetBtn = $('#top-reset-btn');
   const moduleSelect = $('#lnb-module');
   const moduleSwitcherIcon = $('#lnb-module-icon');
   const moduleDot = $('#lnb-module-dot');
@@ -154,6 +155,27 @@
     guide: { label: '답변 가이드', icon: '💬', hint: '새 CS 문의에 대한 답변 초안을 만들어 드립니다.' },
     report: { label: 'VOC 리포트', icon: '📑', hint: '선택한 모듈의 글 현황을 통계·이슈로 정리합니다.' },
     stats: { label: '통계 리포트', icon: '📈', hint: '기간별 전체 글 수와 요청·진행·완료 건수를 집계합니다.' },
+  };
+
+  const MODE_SUGGESTIONS = {
+    guide: [
+      { icon: '💬', title: '답변 초안 만들기', desc: 'CS 문의 → 유사 사례 → 바로 쓸 답변', prompt: '다음 CS 문의에 답변 가이드를 만들어줘:\n[여기에 문의 내용을 붙여넣으세요]' },
+      { icon: '🖼️', title: '캡처 포함 문의 분석', desc: '이미지와 문의 텍스트를 함께 분석', prompt: '첨부한 캡처 이미지와 아래 문의 내용을 함께 보고 답변 가이드를 만들어줘:\n[여기에 문의 내용을 붙여넣으세요]' },
+      { icon: '🔎', title: '과거 사례만 찾기', desc: '답변 전 비슷한 처리 이력 확인', prompt: '다음 문의와 유사한 과거 사례를 찾아서 처리 상태와 답변 패턴을 요약해줘:\n[여기에 문의 내용을 붙여넣으세요]' },
+      { icon: '📋', title: '최근 공지 확인', desc: '릴리즈노트·공지사항 빠른 조회', prompt: '이 모듈에서 최근 릴리즈노트/공지를 5건 보여줘' },
+    ],
+    report: [
+      { icon: '📑', title: 'VOC 리포트 발행', desc: '반복 이슈와 개선 포인트 정리', prompt: '이 모듈의 최근 30건으로 VOC 리포트를 작성해줘' },
+      { icon: '🧩', title: '개선 요청만 정리', desc: '기능 개선 후보와 근거 사례 중심', prompt: '이 모듈의 최근 VOC 중 기능 개선 요청을 중심으로 우선순위와 근거 사례를 정리해줘' },
+      { icon: '⚠️', title: '오류·불편 유형 분석', desc: '장애와 사용 불편 패턴 확인', prompt: '이 모듈의 최근 VOC 중 오류나 사용 불편 유형을 분류하고 대표 사례를 정리해줘' },
+      { icon: '📊', title: '그룹 현황 확인', desc: '총 글 수와 최근 게시물 샘플', prompt: '이 모듈의 현재 글 현황(총 건수, 최근 샘플)을 보여줘' },
+    ],
+    stats: [
+      { icon: '📈', title: '기본 통계 생성', desc: '선택한 기간의 요청·진행·완료 집계', prompt: '', runImmediately: true },
+      { icon: '✅', title: '완료/승인 현황', desc: '처리 완료와 승인 흐름 요약', prompt: '완료 건수와 승인 건수를 중심으로 해석을 추가해줘' },
+      { icon: '⏳', title: '진행 중 항목 점검', desc: '처리 지연 가능성이 있는 항목 확인', prompt: '진행 중이거나 미완료로 남아있는 항목을 중심으로 요약해줘' },
+      { icon: '🧮', title: '봇 제외 통계', desc: '운영자 작성 글 기준으로 집계', prompt: '봇 작성 글은 제외하고 운영팀 참고용 핵심 지표를 요약해줘' },
+    ],
   };
 
   // 도구 함수명 → 사용자 친화 라벨 매핑 (chip 표시용)
@@ -305,6 +327,7 @@
         ? '추가 요청을 입력하세요... (비워두면 기본 요약 보고서 생성)'
         : '질문을 입력하세요... (Shift+Enter: 줄바꿈, Enter: 전송)';
     }
+    renderSuggestions();
     renderCurrentConversation();
   }
 
@@ -428,6 +451,7 @@
       renderModuleStatuses();
     }
     renderRecentQuestions();
+    renderSuggestions();
   }
 
   function renderCurrentConversation() {
@@ -556,6 +580,65 @@
     });
   }
 
+  function enhanceTables(content) {
+    content.querySelectorAll('table').forEach((table) => {
+      if (table.parentElement && table.parentElement.classList.contains('table-scroll')) return;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'table-scroll';
+      table.parentNode.insertBefore(wrapper, table);
+      wrapper.appendChild(table);
+    });
+  }
+
+  function enhanceMessageContent(content) {
+    enhanceCopyableBlocks(content);
+    enhanceTables(content);
+    content.querySelectorAll('a').forEach((a) => {
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+    });
+  }
+
+  function renderToolChips(toolsEl, toolCalls) {
+    if (!toolsEl) return;
+    if (!toolCalls || toolCalls.length === 0) {
+      toolsEl.remove();
+      return;
+    }
+    toolCalls.forEach((tc) => {
+      const meta = TOOL_LABELS[tc.name] || { icon: '🔧', label: tc.name };
+      const chip = document.createElement('span');
+      chip.className = 'tool-chip';
+      chip.textContent = `${meta.icon} ${meta.label}`;
+      chip.title = `${tc.name}\n${JSON.stringify(tc.args || {}, null, 2)}`;
+      toolsEl.appendChild(chip);
+    });
+  }
+
+  function addCopyResponseAction(actionsEl, text) {
+    if (!actionsEl || !text || !text.trim()) return false;
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'copy-response-btn';
+    copyBtn.textContent = '응답 복사';
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await copyTextToClipboard(text.trim());
+        copyBtn.textContent = '복사됨';
+        copyBtn.classList.add('is-copied');
+        setTimeout(() => {
+          copyBtn.textContent = '응답 복사';
+          copyBtn.classList.remove('is-copied');
+        }, 1400);
+      } catch (e) {
+        copyBtn.textContent = '복사 실패';
+        setTimeout(() => { copyBtn.textContent = '응답 복사'; }, 1400);
+      }
+    });
+    actionsEl.appendChild(copyBtn);
+    return true;
+  }
+
   function appendUserMessage(text) {
     const tmpl = $('#message-user-tmpl').content.cloneNode(true);
     tmpl.querySelector('.message-content').textContent = text;
@@ -605,33 +688,58 @@
     recentQuestions.classList.remove('is-hidden');
   }
 
+  function applySuggestion(btn) {
+    const prompt = btn.dataset.prompt || '';
+    if (btn.dataset.runImmediately === 'true') {
+      input.value = prompt;
+      autoGrowInput();
+      form.requestSubmit();
+      return;
+    }
+    input.value = prompt;
+    autoGrowInput();
+    input.focus();
+    const m = prompt.match(/\[[^\]]+\]/);
+    if (m) {
+      const start = prompt.indexOf(m[0]);
+      input.setSelectionRange(start, start + m[0].length);
+    } else {
+      input.setSelectionRange(prompt.length, prompt.length);
+    }
+  }
+
+  function renderSuggestions() {
+    const grid = $('#suggest-grid');
+    if (!grid) return;
+    const suggestions = MODE_SUGGESTIONS[currentMode] || MODE_SUGGESTIONS.guide;
+    grid.innerHTML = '';
+    suggestions.forEach((item) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'suggest-card';
+      btn.dataset.prompt = item.prompt || '';
+      if (item.runImmediately) btn.dataset.runImmediately = 'true';
+      btn.innerHTML = [
+        `<div class="suggest-card-icon">${item.icon}</div>`,
+        `<div class="suggest-card-title">${item.title}</div>`,
+        `<div class="suggest-card-desc">${item.desc}</div>`,
+      ].join('');
+      btn.addEventListener('click', () => applySuggestion(btn));
+      grid.appendChild(btn);
+    });
+  }
+
   function appendBotMessage(text, toolCalls, opts) {
     opts = opts || {};
     const tmpl = $('#message-bot-tmpl').content.cloneNode(true);
     const toolsEl = tmpl.querySelector('.message-tools');
-    if (toolCalls && toolCalls.length > 0) {
-      toolCalls.forEach((tc) => {
-        const meta = TOOL_LABELS[tc.name] || { icon: '🔧', label: tc.name };
-        const chip = document.createElement('span');
-        chip.className = 'tool-chip';
-        chip.textContent = `${meta.icon} ${meta.label}`;
-        chip.title = `${tc.name}\n${JSON.stringify(tc.args || {}, null, 2)}`;
-        toolsEl.appendChild(chip);
-      });
-    } else {
-      toolsEl.remove();
-    }
+    renderToolChips(toolsEl, toolCalls);
     const content = tmpl.querySelector('.message-content');
     content.innerHTML = renderMarkdown(text || '*(응답이 비어있습니다)*');
-    enhanceCopyableBlocks(content);
-    // 모든 링크에 target=_blank 추가
-    content.querySelectorAll('a').forEach((a) => {
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-    });
+    enhanceMessageContent(content);
 
     const actionsEl = tmpl.querySelector('.message-actions');
-    let hasAction = false;
+    let hasAction = addCopyResponseAction(actionsEl, text);
     // 에러 → 재시도 버튼
     if (opts.isError && opts.retryMessage) {
       const retryBtn = document.createElement('button');
@@ -678,30 +786,25 @@
         const body = this.msgEl.querySelector('.message-body');
         this.contentEl.classList.remove('streaming');
         this.contentEl.innerHTML = renderMarkdown(fullText || '*(응답이 비어있습니다)*');
-        enhanceCopyableBlocks(this.contentEl);
-        this.contentEl.querySelectorAll('a').forEach((el) => { el.target = '_blank'; el.rel = 'noopener noreferrer'; });
+        enhanceMessageContent(this.contentEl);
         if (toolCalls && toolCalls.length > 0) {
           const toolsEl = document.createElement('div');
           toolsEl.className = 'message-tools';
-          toolCalls.forEach((tc) => {
-            const meta = TOOL_LABELS[tc.name] || { icon: '🔧', label: tc.name };
-            const chip = document.createElement('span');
-            chip.className = 'tool-chip';
-            chip.textContent = `${meta.icon} ${meta.label}`;
-            chip.title = `${tc.name}\n${JSON.stringify(tc.args || {}, null, 2)}`;
-            toolsEl.appendChild(chip);
-          });
+          renderToolChips(toolsEl, toolCalls);
           body.insertBefore(toolsEl, this.contentEl);
         }
-        if (opts.mode === 'report' && fullText && fullText.trim()) {
+        if (fullText && fullText.trim()) {
           const actionsEl = document.createElement('div');
           actionsEl.className = 'message-actions';
-          const dlBtn = document.createElement('button');
-          dlBtn.type = 'button';
-          dlBtn.className = 'download-btn';
-          dlBtn.innerHTML = '<span>📥</span> HTML 리포트 다운로드';
-          dlBtn.addEventListener('click', () => downloadReport(fullText, opts, dlBtn));
-          actionsEl.appendChild(dlBtn);
+          addCopyResponseAction(actionsEl, fullText);
+          if (opts.mode === 'report') {
+            const dlBtn = document.createElement('button');
+            dlBtn.type = 'button';
+            dlBtn.className = 'download-btn';
+            dlBtn.innerHTML = '<span>📥</span> HTML 리포트 다운로드';
+            dlBtn.addEventListener('click', () => downloadReport(fullText, opts, dlBtn));
+            actionsEl.appendChild(dlBtn);
+          }
           body.appendChild(actionsEl);
         }
         scrollToBottom();
@@ -1032,24 +1135,7 @@
     input.focus();
   });
 
-  // 추천 액션 카드 (welcome 상태)
-  // [여기에 …] 형태의 placeholder가 있으면 해당 영역을 자동 선택해 사용자가 바로 덮어쓰게 함
-  $$('.suggest-card').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const prompt = btn.dataset.prompt;
-      input.value = prompt;
-      autoGrowInput();
-      input.focus();
-      const m = prompt.match(/\[[^\]]+\]/);
-      if (m) {
-        const start = prompt.indexOf(m[0]);
-        input.setSelectionRange(start, start + m[0].length);
-      } else {
-        // placeholder 없으면 입력 끝으로
-        input.setSelectionRange(prompt.length, prompt.length);
-      }
-    });
-  });
+  // 추천 액션 카드는 현재 업무 모드에 맞춰 renderSuggestions()에서 동적으로 생성한다.
 
   // 업무(모드) 항목 (LNB) — 링크지만 같은 페이지에서는 이동 없이 제자리 전환
   $$('.nav-mode-item').forEach((a) => {
@@ -1103,7 +1189,7 @@
   });
 
   // 새 대화 버튼 — 현재 모듈만 초기화 (다른 모듈은 유지)
-  resetBtn.addEventListener('click', async () => {
+  async function resetCurrentConversation() {
     if (!confirm(`'${currentGroup}' 모듈의 '${MODE_LABELS[currentMode].label}' 대화를 종료하고 새 세션을 시작할까요?\n(다른 탭/모듈의 대화는 유지됩니다)`)) return;
     const sid = getSessionFor(currentGroup, currentMode);
     if (sid) {
@@ -1123,7 +1209,10 @@
     messagesEl.innerHTML = '';
     showWelcomeState();
     input.focus();
-  });
+  }
+
+  resetBtn.addEventListener('click', resetCurrentConversation);
+  if (topResetBtn) topResetBtn.addEventListener('click', resetCurrentConversation);
 
   // 헬스체크 (페이지 로딩 시 한 번)
   fetch('/api/health')
@@ -1137,6 +1226,7 @@
   updateSessionBadge();
   initStatsDates();
   renderStatsGroupOptions(currentGroup);
+  renderSuggestions();
   applyMode(currentMode, /*persist*/ !!_urlMode);
   applyModule(currentGroup, /*persist*/ false);
   applyModel(currentModel, /*persist*/ false);
