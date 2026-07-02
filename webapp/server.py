@@ -35,7 +35,7 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -698,7 +698,14 @@ class ChatResponse(BaseModel):
     model: str = ""  # 실제 호출에 사용된 모델 id
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
+async def root(mode: str | None = None):
+    if mode in CHAT_MODES:
+        return RedirectResponse(url=f"/chat?mode={mode}", status_code=307)
+    return RedirectResponse(url="/dashboard", status_code=307)
+
+
+@app.get("/chat", response_class=HTMLResponse)
 async def index(request: Request, mode: str = "guide"):
     user_id = (os.environ.get("AGIT_USER_ID") or "").strip()
     user_name = (os.environ.get("AGIT_USER_NAME") or "").strip()

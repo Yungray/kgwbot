@@ -1,10 +1,10 @@
 {# ───────────────────────────────────────────────────────────
    공통 LNB — 업무 중심 네비게이션
    컨텍스트: groups, module_icons, tools, tool_descs, user_name, model, active_nav
-   active_nav ∈ {guide, report, stats, dashboard}
+   active_nav ∈ {dashboard, guide, report, stats}
    · 모듈은 전역 컨텍스트 스위처(select)로 상단 고정 — index/dashboard 공유
-   · '업무' 항목은 링크(<a>): index에서는 JS가 가로채 제자리 모드 전환,
-     dashboard에서는 실제 /?mode=... 이동
+   · '업무' 항목은 링크(<a>): chat에서는 JS가 가로채 제자리 모드 전환,
+     dashboard에서는 실제 /chat?mode=... 이동
    ─────────────────────────────────────────────────────────── #}
 <aside class="sidebar">
   <div class="sidebar-header">
@@ -34,24 +34,24 @@
     {# ── 업무: 사용자가 하려는 일 ── #}
     <div class="nav-section">
       <div class="nav-section-title">업무</div>
-      <a class="nav-item nav-mode-item{{ ' active' if active_nav == 'guide' else '' }}" data-mode="guide" href="/?mode=guide">
+      <a class="nav-item{{ ' active' if active_nav == 'dashboard' else '' }}" data-nav="dashboard" href="/dashboard">
+        <span class="nav-item-icon">📊</span>
+        <span class="nav-item-label">처리현황 대시보드</span>
+      </a>
+      <a class="nav-item nav-mode-item{{ ' active' if active_nav == 'guide' else '' }}" data-mode="guide" href="/chat?mode=guide">
         <span class="nav-item-icon">💬</span>
         <span class="nav-item-label">답변 가이드</span>
         <span class="module-status nav-mode-status" data-mode-status="guide" aria-live="polite"></span>
       </a>
-      <a class="nav-item nav-mode-item{{ ' active' if active_nav == 'report' else '' }}" data-mode="report" href="/?mode=report">
+      <a class="nav-item nav-mode-item{{ ' active' if active_nav == 'report' else '' }}" data-mode="report" href="/chat?mode=report">
         <span class="nav-item-icon">📑</span>
         <span class="nav-item-label">VOC 리포트</span>
         <span class="module-status nav-mode-status" data-mode-status="report" aria-live="polite"></span>
       </a>
-      <a class="nav-item nav-mode-item{{ ' active' if active_nav == 'stats' else '' }}" data-mode="stats" href="/?mode=stats">
+      <a class="nav-item nav-mode-item{{ ' active' if active_nav == 'stats' else '' }}" data-mode="stats" href="/chat?mode=stats">
         <span class="nav-item-icon">📈</span>
         <span class="nav-item-label">통계 리포트</span>
         <span class="module-status nav-mode-status" data-mode-status="stats" aria-live="polite"></span>
-      </a>
-      <a class="nav-item{{ ' active' if active_nav == 'dashboard' else '' }}" data-nav="dashboard" href="/dashboard">
-        <span class="nav-item-icon">📊</span>
-        <span class="nav-item-label">처리현황 대시보드</span>
       </a>
     </div>
 
