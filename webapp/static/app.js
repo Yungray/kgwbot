@@ -960,6 +960,50 @@
     return true;
   }
 
+  function compactContextText(text, maxLength) {
+    return (text || '')
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/\[[^\]]+\]\([^)]+\)/g, (m) => m.replace(/\(([^)]+)\)/, ''))
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, maxLength);
+  }
+
+  function buildApiMessage(group, mode, currentText) {
+    const cleanCurrent = (currentText || '').trim();
+    const history = getMessagesFor(group, mode)
+      .filter((m) => m && m.text && m.text.trim())
+      .slice(-5);
+
+    if (history.length === 0) return cleanCurrent;
+
+    const contextLines = history.map((m) => {
+      const who = m.role === 'user' ? '사용자' : '봇';
+      const limit = m.role === 'user' ? 700 : 1100;
+      return `- ${who}: ${compactContextText(m.text, limit)}`;
+    });
+
+    return [
+      '[이전 대화 맥락]',
+      '아래 맥락은 같은 브라우저 세션의 직전 대화입니다.',
+      '사용자의 현재 요청이 짧거나 "그거", "유사 사례", "25-26년도"처럼 지시어를 포함하면 이 맥락을 기준으로 해석하세요.',
+      ...contextLines,
+      '',
+      '[현재 사용자 요청]',
+      cleanCurrent || '첨부 이미지 분석 요청',
+    ].join('\n');
+  }
+
+  function userFriendlyFetchError(error) {
+    if (error && error.name === 'AbortError') {
+      return '응답 시간이 길어져 요청을 중단했습니다. 문의 내용을 조금 더 구체적으로 입력하거나 다시 시도해 주세요.';
+    }
+    if (error && /Failed to fetch/i.test(error.message || '')) {
+      return '서버 응답이 중간에 끊겼습니다. 긴 검색이 필요한 후속 질문이면 직전 문의의 핵심 키워드를 함께 입력해 주세요.';
+    }
+    return error && error.message ? error.message : '알 수 없는 연결 오류';
+  }
+
   async function sendMessage(msg) {
     const imagesToSend = pendingImages.slice();
     if (currentMode === 'stats') {
@@ -974,6 +1018,7 @@
     const displayWithImages = imagesToSend.length > 0
       ? `${displayMsg}\n\n[첨부 이미지 ${imagesToSend.length}개]`
       : displayMsg;
+    const apiMessage = buildApiMessage(targetGroup, targetMode, msg);
 
     hideWelcomeState();
     appendUserMessage(displayWithImages);
@@ -991,12 +1036,15 @@
     startLoadingTimer(targetGroup);
 
     const viewMatches = () => currentGroup === targetGroup && currentMode === targetMode;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
     try {
       const res = await fetch('/api/chat/stream', {
         method: 'POST',
+        signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: msg,
+          message: apiMessage,
           session_id: getSessionFor(targetGroup, targetMode),
           mode: targetMode,
           group: targetGroup || null,
@@ -1090,13 +1138,14 @@
     } catch (e) {
       hideLoading();
       stopLoadingTimer();
-      const errText = `❌ **네트워크 오류**: ${e.message}`;
+      const errText = `❌ **연결 실패**: ${userFriendlyFetchError(e)}`;
       const errMsg = { role: 'bot', text: errText, toolCalls: [], mode: targetMode, group: targetGroup, isError: true, retryMessage: msg };
       if (currentGroup === targetGroup && currentMode === targetMode) appendBotMessage(errText, [], errMsg);
       pushMessage(targetGroup, targetMode, errMsg);
       setModuleState(targetGroup, targetMode, { status: 'error', finishedAt: Date.now(), lastMessageAt: Date.now() });
       setStatus('error', '● 연결 실패');
     } finally {
+      clearTimeout(timeoutId);
       sendBtn.disabled = false;
       input.focus();
       renderRecentQuestions();
